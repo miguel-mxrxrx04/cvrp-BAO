@@ -37,6 +37,12 @@ class ACOSolver:
         self.pheromone = {
             (i, j): 1.0 for i in nodes for j in nodes if i != j
         }
+        self.history = {
+        "iteration": [],
+        "best": [],
+        "iteration_best": [],
+        "average": [],
+        }
 
     def _build_distance_matrix(self):
         dist = {}
@@ -210,6 +216,13 @@ class ACOSolver:
             if iteration_solutions:
                 iteration_solutions.sort(key=lambda x: x[1])
                 self._deposit_pheromones(iteration_solutions[0][0])
+                iteration_best = iteration_solutions[0][1]
+                iteration_avg = sum(cost for _, cost in iteration_solutions) / len(iteration_solutions)
+
+                self.history["iteration"].append(iteration)
+                self.history["best"].append(best_cost)
+                self.history["iteration_best"].append(iteration_best)
+                self.history["average"].append(iteration_avg)
 
             for solution, cost in iteration_solutions:
                 if cost <= quality_threshold * best_cost:
@@ -236,3 +249,78 @@ class ACOSolver:
                 break
 
         return best_solution, best_cost, alternatives
+    
+    def plot_convergence(self):
+        import matplotlib.pyplot as plt
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(self.history["iteration"], self.history["best"], label="Global Best")
+        plt.plot(self.history["iteration"], self.history["iteration_best"], label="Iteration Best", alpha=0.7)
+        plt.plot(self.history["iteration"], self.history["average"], label="Iteration Average", alpha=0.7)
+
+        plt.xlabel("Generation")
+        plt.ylabel("Total Distance")
+        plt.title("ACO Convergence Over Generations")
+        plt.legend()
+        plt.grid(True, linestyle="--", alpha=0.5)
+        plt.show()
+
+
+    def plot_solution(self, solution, title="CVRP Solution"):
+        import matplotlib.pyplot as plt
+
+        depot = self.nodes[self.depot_id]
+
+        plt.figure(figsize=(9, 7))
+
+        for route_index, route in enumerate(solution, start=1):
+            full_route = [self.depot_id] + route + [self.depot_id]
+
+            x = [self.nodes[node][0] for node in full_route]
+            y = [self.nodes[node][1] for node in full_route]
+
+            plt.plot(x, y, marker="o", linewidth=1.5, label=f"Route {route_index}")
+
+        plt.scatter(depot[0], depot[1], marker="s", s=150, label="Depot")
+
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        plt.title(title)
+        plt.legend()
+        plt.grid(True, linestyle="--", alpha=0.5)
+        plt.show()
+
+
+    def plot_alternatives(self, alternatives):
+        for i, (solution, cost) in enumerate(alternatives, start=1):
+            self.plot_solution(
+                solution,
+                title=f"Alternative {i} | Distance = {cost:.2f}"
+            )
+
+
+    def plot_alternative_comparison(self, best_cost, alternatives):
+        import matplotlib.pyplot as plt
+
+        labels = []
+        costs = []
+
+        for i, (_, cost) in enumerate(alternatives, start=1):
+            labels.append(f"Alt {i}")
+            costs.append(cost)
+
+        gaps = [(cost / best_cost - 1) * 100 for cost in costs]
+
+        plt.figure(figsize=(8, 5))
+        plt.bar(labels, costs)
+
+        plt.axhline(best_cost, linestyle="--", label=f"Best = {best_cost:.2f}")
+
+        for i, gap in enumerate(gaps):
+            plt.text(i, costs[i], f"+{gap:.2f}%", ha="center", va="bottom")
+
+        plt.ylabel("Total Distance")
+        plt.title("Comparison of Diverse ACO Alternatives")
+        plt.legend()
+        plt.grid(True, axis="y", linestyle="--", alpha=0.5)
+        plt.show()
