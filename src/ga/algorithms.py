@@ -1,5 +1,5 @@
 import random 
-from src.problem import CVRPProblem
+from src.common.problem import CVRPProblem
 
 class MultimodalGeneticAlgorithm:
     def __init__(self, problem: CVRPProblem, pop_size: int = 100):

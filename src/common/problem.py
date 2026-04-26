@@ -28,6 +28,10 @@ class CVRPProblem:
 
                 matrix[i][j] = math.sqrt((x1 - x2)**2 + (y1 - y2)**2)
         return matrix
+
+    def get_distance(self, init_pos: int, target_pos: int):
+        """Returns the euclidean distance between 2 positions"""
+        return self.distance_matrix[init_pos][target_pos]
     
     def evaluate_route_distance(self, route: list) -> float:
         """
