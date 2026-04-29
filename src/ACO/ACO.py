@@ -31,7 +31,7 @@ class InspyredACOSolver:
         self.evaporation = evaporation
         self.q = q
 
-        # PRNG instance required by inspyred
+        # PRNG instance required by the inspyred framework
         self.prng = random.Random(seed)
 
         self.customers = [i for i in nodes if i != depot_id]
@@ -42,7 +42,7 @@ class InspyredACOSolver:
             (i, j): 1.0 for i in nodes for j in nodes if i != j
         }
 
-        # History dictionary for plotting
+        # History dictionary for plotting metrics
         self.history = {
             "iteration": [],
             "best": [],
@@ -50,7 +50,7 @@ class InspyredACOSolver:
             "average": [],
         }
 
-        # Archive for multimodal solutions
+        # Archive for storing multimodal solutions
         self.archive = []
 
     def _build_distance_matrix(self):
@@ -201,8 +201,21 @@ class InspyredACOSolver:
     # INSPYRED FRAMEWORK COMPONENTS
     # =====================================================================
 
-    def _generate_ants(self):
-        """Helper method to construct and improve an entire ant population."""
+    def _aco_generator(self, random, args):
+        """
+        [INSPYRED GENERATOR]
+        Generates a single ant. Inspyred automatically calls this function
+        'pop_size' times to build the initial population.
+        """
+        sol = self.construct_solution()
+        sol = self.improve_solution(sol)
+        return sol
+
+    def _aco_variator(self, random, candidates, args):
+        """
+        [INSPYRED VARIATOR]
+        Generates the entire new ant population for subsequent generations.
+        """
         solutions = []
         for _ in range(self.n_ants):
             sol = self.construct_solution()
@@ -210,40 +223,35 @@ class InspyredACOSolver:
             solutions.append(sol)
         return solutions
 
-    def _aco_generator(self, random, args):
-        """[INSPYRED] Generates the initial population for the first generation."""
-        return self._generate_ants()
-
-    def _aco_variator(self, random, candidates, args):
-        """[INSPYRED] Generates brand new ants for subsequent generations."""
-        return self._generate_ants()
-
     def _aco_evaluator(self, candidates, args):
-        """[INSPYRED] Calculates fitness (distance) for each ant. Penalizes invalid routes."""
+        """[INSPYRED EVALUATOR] Calculates distance for each ant. Penalizes invalid routes."""
         fitnesses = []
         for sol in candidates:
             if self.is_valid(sol):
                 fitnesses.append(self.solution_distance(sol))
             else:
-                fitnesses.append(float('inf'))  # Heavy penalty for invalid solutions
+                fitnesses.append(float('inf'))  # Maximum penalty for invalid solutions
         return fitnesses
 
-    def _aco_replacer(self, random, population, parents, survivors, args):
-        """[INSPYRED] Handles pheromone updates and replaces the old population."""
-        # 1. Evaporate pheromones globally
+    def _aco_replacer(self, random, population, parents, offspring, args):
+        """
+        [INSPYRED REPLACER]
+        Handles pheromone updates and replaces the old population.
+        """
+        # 1. Global pheromone evaporation
         self._evaporate_pheromones()
 
-        # 2. Deposit pheromones based on the best ant of the current iteration (survivors)
-        valid_survivors = [ind for ind in survivors if ind.fitness != float('inf')]
-        if valid_survivors:
-            iteration_best = min(valid_survivors, key=lambda x: x.fitness)
+        # 2. Deposit pheromones based on the best ant of the current iteration
+        valid_offspring = [ind for ind in offspring if ind.fitness != float('inf')]
+        if valid_offspring:
+            iteration_best = min(valid_offspring, key=lambda x: x.fitness)
             self._deposit_pheromones(iteration_best.candidate, iteration_best.fitness)
 
-        # 3. Generational replacement: new ants (survivors) replace the old population
-        return survivors
+        # 3. Generational replacement: new ants entirely replace the old population
+        return offspring
 
     def _aco_observer(self, population, num_generations, num_evaluations, args):
-        """[INSPYRED] Logs metrics per generation and manages the multimodal archive."""
+        """[INSPYRED OBSERVER] Logs metrics per generation and manages the multimodal archive."""
         valid_pop = [ind for ind in population if ind.fitness != float('inf')]
         if not valid_pop:
             return
@@ -256,13 +264,13 @@ class InspyredACOSolver:
             best_so_far = iteration_best_val
             args['best_so_far'] = best_so_far
 
-        # Log for plots
+        # Log for metrics plotting
         self.history["iteration"].append(num_generations)
         self.history["best"].append(best_so_far)
         self.history["iteration_best"].append(iteration_best_val)
         self.history["average"].append(iteration_avg)
 
-        # Manage archive for multimodal alternatives
+        # Manage archive for multimodal diverse alternatives
         quality_threshold = args.get('quality_threshold', 1.05)
         for ind in valid_pop:
             if ind.fitness <= quality_threshold * best_so_far:
@@ -289,11 +297,11 @@ class InspyredACOSolver:
             evaluator=self._aco_evaluator,
             pop_size=self.n_ants,
             max_generations=self.n_iterations,
-            maximize=False,  # We want to minimize distance
-            quality_threshold=quality_threshold  # Passed to observer
+            maximize=False,  # Objective is to minimize distance
+            quality_threshold=quality_threshold
         )
 
-        # Extract the absolute best solution from our archive
+        # Extract the absolute best solution from the archive
         best_solution = None
         best_cost = float("inf")
 
