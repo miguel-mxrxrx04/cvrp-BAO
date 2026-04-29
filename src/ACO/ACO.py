@@ -1,22 +1,23 @@
 import math
 import random
 from copy import deepcopy
+import inspyred
 
 
-class ACOSolver:
+class InspyredACOSolver:
     def __init__(
-        self,
-        nodes,
-        demands,
-        capacity,
-        depot_id=1,
-        n_ants=40,
-        n_iterations=200,
-        alpha=1.0,
-        beta=3.0,
-        evaporation=0.25,
-        q=100.0,
-        seed=42,
+            self,
+            nodes,
+            demands,
+            capacity,
+            depot_id=1,
+            n_ants=40,
+            n_iterations=200,
+            alpha=1.0,
+            beta=3.0,
+            evaporation=0.25,
+            q=100.0,
+            seed=42,
     ):
         self.nodes = nodes
         self.demands = demands
@@ -30,19 +31,27 @@ class ACOSolver:
         self.evaporation = evaporation
         self.q = q
 
-        random.seed(seed)
+        # PRNG instance required by inspyred
+        self.prng = random.Random(seed)
 
         self.customers = [i for i in nodes if i != depot_id]
         self.dist = self._build_distance_matrix()
+
+        # Initialize pheromone matrix
         self.pheromone = {
             (i, j): 1.0 for i in nodes for j in nodes if i != j
         }
+
+        # History dictionary for plotting
         self.history = {
-        "iteration": [],
-        "best": [],
-        "iteration_best": [],
-        "average": [],
+            "iteration": [],
+            "best": [],
+            "iteration_best": [],
+            "average": [],
         }
+
+        # Archive for multimodal solutions
+        self.archive = []
 
     def _build_distance_matrix(self):
         dist = {}
@@ -76,9 +85,9 @@ class ACOSolver:
         total = sum(scores)
 
         if total == 0:
-            return random.choice(feasible)
+            return self.prng.choice(feasible)
 
-        r = random.random() * total
+        r = self.prng.random() * total
         cumulative = 0.0
 
         for customer, score in zip(feasible, scores):
@@ -142,8 +151,7 @@ class ACOSolver:
             self.pheromone[edge] *= (1.0 - self.evaporation)
             self.pheromone[edge] = max(self.pheromone[edge], 1e-6)
 
-    def _deposit_pheromones(self, solution):
-        cost = self.solution_distance(solution)
+    def _deposit_pheromones(self, solution, cost):
         deposit = self.q / cost
 
         for route in solution:
@@ -189,50 +197,114 @@ class ACOSolver:
 
         return sorted(seen) == sorted(self.customers)
 
+    # =====================================================================
+    # INSPYRED FRAMEWORK COMPONENTS
+    # =====================================================================
+
+    def _generate_ants(self):
+        """Helper method to construct and improve an entire ant population."""
+        solutions = []
+        for _ in range(self.n_ants):
+            sol = self.construct_solution()
+            sol = self.improve_solution(sol)
+            solutions.append(sol)
+        return solutions
+
+    def _aco_generator(self, random, args):
+        """[INSPYRED] Generates the initial population for the first generation."""
+        return self._generate_ants()
+
+    def _aco_variator(self, random, candidates, args):
+        """[INSPYRED] Generates brand new ants for subsequent generations."""
+        return self._generate_ants()
+
+    def _aco_evaluator(self, candidates, args):
+        """[INSPYRED] Calculates fitness (distance) for each ant. Penalizes invalid routes."""
+        fitnesses = []
+        for sol in candidates:
+            if self.is_valid(sol):
+                fitnesses.append(self.solution_distance(sol))
+            else:
+                fitnesses.append(float('inf'))  # Heavy penalty for invalid solutions
+        return fitnesses
+
+    def _aco_replacer(self, random, population, parents, survivors, args):
+        """[INSPYRED] Handles pheromone updates and replaces the old population."""
+        # 1. Evaporate pheromones globally
+        self._evaporate_pheromones()
+
+        # 2. Deposit pheromones based on the best ant of the current iteration (survivors)
+        valid_survivors = [ind for ind in survivors if ind.fitness != float('inf')]
+        if valid_survivors:
+            iteration_best = min(valid_survivors, key=lambda x: x.fitness)
+            self._deposit_pheromones(iteration_best.candidate, iteration_best.fitness)
+
+        # 3. Generational replacement: new ants (survivors) replace the old population
+        return survivors
+
+    def _aco_observer(self, population, num_generations, num_evaluations, args):
+        """[INSPYRED] Logs metrics per generation and manages the multimodal archive."""
+        valid_pop = [ind for ind in population if ind.fitness != float('inf')]
+        if not valid_pop:
+            return
+
+        iteration_best_val = min(valid_pop, key=lambda x: x.fitness).fitness
+        iteration_avg = sum(ind.fitness for ind in valid_pop) / len(valid_pop)
+
+        best_so_far = args.setdefault('best_so_far', float('inf'))
+        if iteration_best_val < best_so_far:
+            best_so_far = iteration_best_val
+            args['best_so_far'] = best_so_far
+
+        # Log for plots
+        self.history["iteration"].append(num_generations)
+        self.history["best"].append(best_so_far)
+        self.history["iteration_best"].append(iteration_best_val)
+        self.history["average"].append(iteration_avg)
+
+        # Manage archive for multimodal alternatives
+        quality_threshold = args.get('quality_threshold', 1.05)
+        for ind in valid_pop:
+            if ind.fitness <= quality_threshold * best_so_far:
+                self.archive.append((deepcopy(ind.candidate), ind.fitness))
+
+    # =====================================================================
+    # MAIN EXECUTION
+    # =====================================================================
+
     def solve(self, n_alternatives=3, quality_threshold=1.05, min_diversity=0.20):
+        # Instantiate the inspyred EC engine
+        ea = inspyred.ec.EvolutionaryComputation(self.prng)
+
+        # Inject standard components
+        ea.selector = inspyred.ec.selectors.default_selection
+        ea.variator = self._aco_variator
+        ea.replacer = self._aco_replacer
+        ea.observer = self._aco_observer
+        ea.terminator = inspyred.ec.terminators.generation_termination
+
+        # Run the evolution
+        ea.evolve(
+            generator=self._aco_generator,
+            evaluator=self._aco_evaluator,
+            pop_size=self.n_ants,
+            max_generations=self.n_iterations,
+            maximize=False,  # We want to minimize distance
+            quality_threshold=quality_threshold  # Passed to observer
+        )
+
+        # Extract the absolute best solution from our archive
         best_solution = None
         best_cost = float("inf")
-        archive = []
 
-        for iteration in range(self.n_iterations):
-            iteration_solutions = []
+        if self.archive:
+            self.archive.sort(key=lambda x: x[1])
+            best_solution = self.archive[0][0]
+            best_cost = self.archive[0][1]
 
-            for _ in range(self.n_ants):
-                solution = self.construct_solution()
-                solution = self.improve_solution(solution)
-
-                if not self.is_valid(solution):
-                    continue
-
-                cost = self.solution_distance(solution)
-                iteration_solutions.append((solution, cost))
-
-                if cost < best_cost:
-                    best_solution = deepcopy(solution)
-                    best_cost = cost
-
-            self._evaporate_pheromones()
-
-            if iteration_solutions:
-                iteration_solutions.sort(key=lambda x: x[1])
-                self._deposit_pheromones(iteration_solutions[0][0])
-                iteration_best = iteration_solutions[0][1]
-                iteration_avg = sum(cost for _, cost in iteration_solutions) / len(iteration_solutions)
-
-                self.history["iteration"].append(iteration)
-                self.history["best"].append(best_cost)
-                self.history["iteration_best"].append(iteration_best)
-                self.history["average"].append(iteration_avg)
-
-            for solution, cost in iteration_solutions:
-                if cost <= quality_threshold * best_cost:
-                    archive.append((deepcopy(solution), cost))
-
-        archive.sort(key=lambda x: x[1])
-
+        # Extract diverse multimodal alternatives
         alternatives = []
-
-        for solution, cost in archive:
+        for solution, cost in self.archive:
             if len(alternatives) == 0:
                 alternatives.append((solution, cost))
                 continue
@@ -249,7 +321,11 @@ class ACOSolver:
                 break
 
         return best_solution, best_cost, alternatives
-    
+
+    # =====================================================================
+    # PLOTTING FUNCTIONS
+    # =====================================================================
+
     def plot_convergence(self):
         import matplotlib.pyplot as plt
 
@@ -264,7 +340,6 @@ class ACOSolver:
         plt.legend()
         plt.grid(True, linestyle="--", alpha=0.5)
         plt.show()
-
 
     def plot_solution(self, solution, title="CVRP Solution"):
         import matplotlib.pyplot as plt
@@ -290,14 +365,12 @@ class ACOSolver:
         plt.grid(True, linestyle="--", alpha=0.5)
         plt.show()
 
-
     def plot_alternatives(self, alternatives):
         for i, (solution, cost) in enumerate(alternatives, start=1):
             self.plot_solution(
                 solution,
                 title=f"Alternative {i} | Distance = {cost:.2f}"
             )
-
 
     def plot_alternative_comparison(self, best_cost, alternatives):
         import matplotlib.pyplot as plt
