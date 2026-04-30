@@ -2,12 +2,20 @@
 import math  # Modulo matematico para calcular distancias entre coordenadas
 from typing import Optional  # Para el tipado de variables que pueden ser nulas o vacias
 
-# Clase encargada de empalmar rutas terminadas para reducir el numero total de camiones
+
+# Clase encargada de juntar rutas terminadas para reducir el numero total de camiones
 class JoinRoutes:
 
-    # Funcion principal que orquesta la reduccion de rutas hasta cumplir el limite
+    # Funcion principal que hace la reduccion de rutas hasta cumplir el limite
     @staticmethod
-    def consolidar_rutas(rutas_pso: list, demands: dict, capacity: int, limite_camiones: int, depot_id: int, nodes: dict) -> list:
+    def consolidar_rutas(
+        rutas_pso: list,
+        demands: dict,
+        capacity: int,
+        limite_camiones: int,
+        depot_id: int,
+        nodes: dict
+    ) -> list:
         
         # Trabajamos sobre una copia de las rutas para no alterar el array original
         rutas_actuales: list = rutas_pso.copy()
@@ -47,7 +55,11 @@ class JoinRoutes:
 
     # Funcion interna para calcular el peso total que lleva cada ruta devuelta por el PSO
     @staticmethod
-    def _calcular_cargas(rutas: list, demands: dict, depot_id: int) -> list:
+    def _calcular_cargas(
+        rutas: list,
+        demands: dict,
+        depot_id: int
+    ) -> list:
         
         # Lista donde guardaremos los datos auditados de cada ruta
         datos_rutas: list = []
@@ -101,7 +113,11 @@ class JoinRoutes:
 
     # Funcion interna para unir dos listas de rutas quitando cruces innecesarios y aplicando 2-opt
     @staticmethod
-    def _empalmar_rutas(ruta_1: list, ruta_2: list, nodes: dict) -> list:
+    def _empalmar_rutas(
+        ruta_1: list,
+        ruta_2: list,
+        nodes: dict
+    ) -> list:
         
         # Excluimos el ultimo elemento de la ruta 1 y el primer elemento de la ruta 2 para fusionarlas
         nueva_ruta_sucia: list = ruta_1[:-1] + ruta_2[1:]
@@ -147,7 +163,12 @@ class JoinRoutes:
 
     # Funcion interna para calcular matematicamente si un cambio de aristas reduce la distancia
     @staticmethod
-    def _calcular_cambio_distancia(ruta: list, i: int, j: int, nodes: dict) -> float:
+    def _calcular_cambio_distancia(
+        ruta: list,
+        i: int,
+        j: int,
+        nodes: dict
+    ) -> float:
         
         # Identificamos los 4 nodos implicados en el posible cruce
         nodo_a_previo: int = ruta[i - 1]

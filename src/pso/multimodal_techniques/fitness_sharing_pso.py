@@ -4,6 +4,7 @@ import numpy as np  # Manejo eficiente de vectores numericos
 
 from inspyred import swarm  # Modulos del motor de inteligencia de enjambre e Inspyred
 from src.pso.base_pso import BasePSO  # Nuestra clase padre
+from src.common.problem import CVRPProblem  # Clase que define el problema a resolver
 
 
 # Definimos la clase hija exclusiva para la tecnica de Fitness Sharing
@@ -11,10 +12,12 @@ class FitnessSharingPSO(BasePSO):
 
     # Constructor que añade los parametros exclusivos de esta tecnica
     def __init__(
-            self, datos_problema,
-            radio: float=2.0, alpha: float=1.0,
-            num_soluciones_corregir: float=0.05
-        ):
+        self,
+        datos_problema: CVRPProblem=None,
+        radio: float=2.0,
+        alpha: float=1.0,
+        num_soluciones_corregir=None
+    ):
         
         # Invocamos al constructor del padre para inicializar lo basico (dimensiones, limites, etc.)
         super().__init__(datos_problema, num_soluciones_corregir)
@@ -23,14 +26,33 @@ class FitnessSharingPSO(BasePSO):
         self.radio: float = radio
         self.alpha: float = alpha
 
-    # Funcion que configura el pso dependiendo de los datos
-    def config_pso(self, algoritmo: swarm.PSO) -> None:
-        
-        # Ponemos topologia anillo
-        algoritmo.topology = swarm.topologies.ring_topology
+    # Funcion que devuelve los parametros de la configuracion
+    def get_params_configuracion(self) -> dict:
+
+        # Llamamos la funcion padre
+        config_params: dict = super().get_params_configuracion()
+
+        # Añadimos los que falta
+        config_params['radio'] = self.radio
+        config_params['alpha'] = self.alpha
+
+        # Lo devolvemos
+        return config_params
+
+    # Funcion que evalua los individuos con su fitness
+    def evaluator(self, candidates: list, args: dict) -> list:
+
+        # Aplicamos la funcion del padre
+        fitness_base: list = super().evaluator(candidates, args)
+
+        # Aplicamos penalizaciones (para obtener multiples soluciones con fitness sharing, clearing, etc)
+        fitness_penalizado: np.ndarray = self._aplicar_penalizacion(fitness_base, candidates)
+
+        # Retornamos directamente la lista de distancias sin alterar
+        return fitness_penalizado.tolist()
 
     # Funcion para calcular el impacto de la densidad en el fitness
-    def _aplicar_penalizacion(self, fitness_base: np.ndarray, candidatos: list) -> np.array:
+    def _aplicar_penalizacion(self, fitness_base: list, candidatos: list) -> np.array:
         
         # Inicializamos el vector de salida
         fitness_final: np.ndarray = np.copy(fitness_base)

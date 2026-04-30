@@ -11,7 +11,7 @@ class ClusteringManager:
     
     # Funcion para calcular la cantidad de clústers ideal basada en la carga del mapa
     @staticmethod
-    def calcular_k_ideal(num_clientes: int, max_clientes_por_cluster: int=40) -> int:
+    def calcular_k_ideal(num_clientes: int, max_clientes_por_cluster: int) -> int:
         
         # Calculamos el K dividiendo y redondeando hacia arriba
         k_calculado: int = math.ceil(num_clientes / max_clientes_por_cluster)
@@ -21,7 +21,13 @@ class ClusteringManager:
 
     # Funcion principal que orquesta la division llamando a los metodos privados
     @staticmethod
-    def generar_sub_problemas(nodes: dict, demands: dict, capacity: int, k_clusters: int, truck_penalty: float=2) -> list:
+    def generar_sub_problemas(
+        nodes: dict,
+        demands: dict,
+        capacity: int,
+        k_clusters: int,
+        truck_penalty: float=2
+    ) -> list:
         
         # Extraemos el ID del deposito (siempre es la primera llave del diccionario)
         depot_id: int = list(nodes.keys())[0]
@@ -30,20 +36,39 @@ class ClusteringManager:
         clientes_ids: list = [n for n in nodes.keys() if n != depot_id]
         
         # Extraemos variables clave y ejecutamos el algoritmo K-Means
-        etiquetas, clientes_ids = ClusteringManager._ejecutar_kmeans(nodes, k_clusters, clientes_ids)
+        etiquetas, clientes_ids = ClusteringManager._ejecutar_kmeans(nodes, demands, capacity, k_clusters, clientes_ids)
         
         # Agrupamos los nodos en diccionarios basandonos en las etiquetas del algoritmo
-        zonas_brutas = ClusteringManager._agrupar_zonas(etiquetas, clientes_ids, nodes, demands, depot_id)
+        zonas_brutas: dict = ClusteringManager._agrupar_zonas(etiquetas, clientes_ids, nodes, demands, depot_id)
         
         # Instanciamos los objetos del problema CVRP listos para el PSO
-        problemas_listos = ClusteringManager._instanciar_problemas(zonas_brutas, capacity, truck_penalty)
+        problemas_listos: list = ClusteringManager._instanciar_problemas(zonas_brutas, capacity, truck_penalty)
         
         # Retornamos la lista final
         return problemas_listos
 
-    # Funcion interna para realizar la prediccion geometrica/demanda
+    # Funcion interna para realizar el clustering
     @staticmethod
-    def _ejecutar_kmeans(nodes: dict, k_clusters: int, clientes_ids: list) -> tuple:
+    def _ejecutar_kmeans(
+        nodes: dict,
+        demands: dict,
+        capacity: int,
+        k_clusters: int,
+        clientes_ids: list
+    ) -> tuple:
+
+        # Buscamos limites maximos para normalizar la geografia
+        max_x: float = max([coord[0] for coord in nodes.values()])
+        max_y: float = max([coord[1] for coord in nodes.values()])
+
+        # Calculamos el promedio ideal usando logica de divisiones (Logaritmo)
+        demanda_maxima: int = max([demands[c] for c in clientes_ids])
+        n: int = math.ceil(math.log2(capacity / demanda_maxima))
+        promedio_ideal: float = capacity / (2 ** n)
+        
+        # Pre-calculamos las demandas falsas para poder normalizarlas
+        demandas_falsas = [abs(demands[c] - promedio_ideal) for c in clientes_ids]
+        max_demanda_falsa: float = max(demandas_falsas)
         
         # Lista para guardar los datos transformados
         datos_entrenamiento: list = []
@@ -53,9 +78,17 @@ class ClusteringManager:
             
             # Posicion del cliente
             x, y = nodes[cliente]
+
+            # Normalizamos en el rango 0, 1
+            x_norm: float = x / max_x
+            y_norm: float = y / max_y
+
+            # Calculamos la demanda falsa (complementaria)
+            demanda_falsa: float = abs(demands[cliente] - promedio_ideal)
+            demanda_falsa_norm: float = demanda_falsa / max_demanda_falsa
             
-            # Añadimos el nuevo cliente (con la demanda cambiada para agrupar clientes con demandas desiguales)
-            datos_entrenamiento.append([x, y])
+            # Añadimos el nuevo cliente
+            datos_entrenamiento.append([x_norm, y_norm, demanda_falsa_norm])
             
         # Inicializamos y ejecutamos el algoritmo K-Means
         kmeans: KMeans = KMeans(n_clusters=k_clusters, random_state=42, n_init='auto')
@@ -66,7 +99,13 @@ class ClusteringManager:
 
     # Funcion interna para separar los diccionarios originales en sub-zonas
     @staticmethod
-    def _agrupar_zonas(etiquetas: np.ndarray, clientes_ids: list, nodes: dict, demands: dict, depot_id: int) -> dict:
+    def _agrupar_zonas(
+        etiquetas: np.ndarray,
+        clientes_ids: list,
+        nodes: dict,
+        demands: dict,
+        depot_id: int
+    ) -> dict:
         
         # Diccionario temporal para agrupar los nodos
         zonas_brutas: dict = {}
@@ -97,7 +136,11 @@ class ClusteringManager:
 
     # Funcion interna para inicializar las clases de los problemas
     @staticmethod
-    def _instanciar_problemas(zonas_brutas: dict, capacity: int, truck_penalty: int) -> list:
+    def _instanciar_problemas(
+        zonas_brutas: dict,
+        capacity: int,
+        truck_penalty: int
+    ) -> list:
         
         # Lista final donde guardaremos los objetos
         problemas_listos: list = []
@@ -106,14 +149,14 @@ class ClusteringManager:
         for data in zonas_brutas.values():
             
             # Calculamos el minimo estricto de camiones teoricos para esta zona
-            m_minimo: int = math.ceil(data['carga_total'] / capacity)
+            truck_limit: int = math.ceil(data['carga_total'] / capacity)
             
             # Instanciamos el problema especializado pasandole los datos y el limite
             sub_problema = ClusterCVRPProblem(
                 nodes=data['nodes'],
                 demands=data['demands'],
                 capacity=capacity,
-                m_minimo=m_minimo,
+                truck_limit=truck_limit,
                 truck_penalty=truck_penalty
             )
             

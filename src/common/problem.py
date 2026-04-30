@@ -2,7 +2,7 @@ import numpy as np
 import math
 
 class CVRPProblem:
-    def __init__(self, nodes: dict, demands: dict, capacity: int):
+    def __init__(self, nodes: dict, demands: dict, capacity: int, truck_limit: int):
         """Initializes the CVRP environment and precalculates distances."""
         self.nodes = nodes
         self.demands = demands
@@ -11,6 +11,8 @@ class CVRPProblem:
 
         self.node_ids = list(self.nodes.keys())
         self.depot_id = self.node_ids[0]
+
+        self.truck_limit = truck_limit
 
         self.distance_matrix = self._calculate_distance_matrix()
         print(f"[Problem] Distance matrix ({self.dimension}x{self.dimension}) precalculated.")
@@ -28,6 +30,9 @@ class CVRPProblem:
 
                 matrix[i][j] = math.sqrt((x1 - x2)**2 + (y1 - y2)**2)
         return matrix
+
+    def get_total_nodes(self) -> int:
+        return len(self.nodes) - 1
 
     def get_distance(self, init_pos: int, target_pos: int):
         """Returns the euclidean distance between 2 positions"""

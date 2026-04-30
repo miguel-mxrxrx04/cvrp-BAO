@@ -2,24 +2,31 @@
 import math  # Modulo matematico para calcular distancias
 import numpy as np  # Manejo eficiente de vectores numericos
 
-from abc import ABC, abstractmethod  # Para forzar clase abstracta
-from inspyred import benchmarks, ec, swarm  # Modulos de inspyred para crear nuestra clase base
+from inspyred import benchmarks, ec, swarm  # Modulos de inspyred
+from src.common.problem import CVRPProblem  # Clase que define el problema a resolver
 
 
 # Definimos la clase base del problema CVRP adaptada para PSO
-class BasePSO(benchmarks.Benchmark, ABC):
+class BasePSO(benchmarks.Benchmark):
 
     # Constructor que inicializa el problema base
-    def __init__(self, datos_problema, num_soluciones_corregir=None):
+    def __init__(self, datos_problema: CVRPProblem=None, num_soluciones_corregir=None):
         
         # Almacenamos la instancia original del problema CVRP
-        self.datos_problema = datos_problema
-        
-        # Calculamos la dimension restando el deposito al conteo total
-        self.dimension: int = len(datos_problema.node_ids) - 1
-        
-        # Inicializamos la clase padre con la dimension calculada
-        benchmarks.Benchmark.__init__(self, self.dimension)
+        self.datos_problema: CVRPProblem = datos_problema
+
+        # Vemos si nos dan un problema
+        if datos_problema is not None:
+
+            # Calculamos la dimension restando el deposito al conteo total
+            self.dimension: int = len(datos_problema.node_ids) - 1
+            
+            # Inicializamos la clase padre con la dimension calculada
+            benchmarks.Benchmark.__init__(self, self.dimension)
+
+        # Si no nos lo dan, iniciamos a 0
+        else:
+            self.dimension: int = 0
         
         # Configuramos los limites continuos para el vector espacial (0.0 a 1.0)
         self.bounder: ec.Bounder = ec.Bounder(0.0, 1.0)
@@ -30,10 +37,47 @@ class BasePSO(benchmarks.Benchmark, ABC):
         # Asignamos el porcentaje o numero de soluciones que corregiremos con 2-opt
         self.num_soluciones_corregir = num_soluciones_corregir
 
+    # Funcion que asigna un problema al algoritmo
+    def asignar_problema(self, problema: CVRPProblem) -> None:
+
+        # Asignamos el problema
+        self.datos_problema: CVRPProblem = problema
+
+        # Asignamos la dimension del problema
+        self.dimension: int = len(problema.node_ids) - 1
+
+        # Inicializamos la clase padre con la dimension calculada
+        benchmarks.Benchmark.__init__(self, self.dimension)
+
+        # Asignamos que minimizamos
+        self.maximize: bool = False
+
+    # Funcion que devuelve los parametros de la configuracion
+    def get_params_configuracion(self) -> dict:
+
+        # Lo devolvemos en un dict
+        return {
+            'num_soluciones_corregir': self.num_soluciones_corregir
+        }
+
+    # Funcion que devuelve el fenotipo de una particula
+    def get_ruta_particula(self, particula: ec.Individual) -> list:
+
+        # Obtenemos el fenotipo
+        fenotipo_particula: list = self._decodificar_spv(particula.candidate)
+
+        # Aplicamos el 2-opt si lo piden
+        if self.num_soluciones_corregir:
+            fenotipo_particula: list = self._aplicar_2_opt_ruta(fenotipo_particula)
+
+        # Devolvemos el fenotipo (pasamos de genotipo a fenotipo)
+        return fenotipo_particula
+
     # Funcion que configura el pso dependiendo de los datos
-    @abstractmethod
     def config_pso(self, algoritmo: swarm.PSO) -> None:
-        pass
+        
+        # Le ponemos topologia anillo como base
+        algoritmo.topology = swarm.topologies.ring_topology
 
     # Funcion generadora de nuevas particulas continuas
     def generator(self, random, args: dict) -> list:
@@ -42,44 +86,6 @@ class BasePSO(benchmarks.Benchmark, ABC):
 
     # Funcion que evalua los individuos con su fitness
     def evaluator(self, candidates: list, args: dict) -> list:
-        
-        # Obtenemos los fitness puros usando nuestra funcion interna
-        fitness_base_np: np.ndarray = self._obtener_fitness_base(candidates)
-
-        # Aplicamos penalizaciones (para obtener multiples soluciones con fitness sharing, clearing, etc)
-        fitness_penalizado: np.ndarray = self._aplicar_penalizacion(fitness_base_np, candidates)
-
-        # Retornamos directamente la lista de distancias sin alterar
-        return fitness_penalizado.tolist()
-
-    @abstractmethod
-    def _aplicar_penalizacion(self, fitness_base: np.ndarray, candidatos: list) -> np.ndarray:
-        pass
-
-    # Funcion que devuelve los candidatos a devolver
-    def _obtener_n_mejores(self, n_candidatos: int) -> int:
-
-        # Si el usuario nos pasa 0, 0.0 o None, apagamos el 2-opt
-        if not self.num_soluciones_corregir:
-            return 0
-
-        # Comprobamos si es un porcentaje (float)
-        if isinstance(self.num_soluciones_corregir, float):
-
-            # Calculamos la fraccion y aseguramos que al menos devuelva 3 (el minimo pedido)
-            return max(3, int(n_candidatos * self.num_soluciones_corregir))
-        
-        # Comprobamos si es un numero exacto (int)
-        elif isinstance(self.num_soluciones_corregir, int):
-
-            # Devolvemos el numero de soluciones (minimo, el numero de candidatos. No recomendado)
-            return min(n_candidatos, self.num_soluciones_corregir)
-            
-        # Por defecto sacamos 3
-        return 3
-    
-    # Funcion que obtiene el fitness bas + los n mejores con 2-0pt
-    def _obtener_fitness_base(self, candidates: list) -> np.array:
         
         # Obtenemos los costos reales sin ninguna penalizacion
         fitness_crudo: list = []
@@ -101,8 +107,30 @@ class BasePSO(benchmarks.Benchmark, ABC):
         # Aplicamos 2-opt a los n mejores si corresponde
         self._aplicar_2_opt_global(fitness_crudo, rutas_reales)
 
-        # Lo devolvemos en array numpy
-        return np.array(fitness_crudo)
+        # Lo devolvemos
+        return fitness_crudo
+
+    # Funcion que devuelve los candidatos a devolver
+    def _obtener_n_mejores(self, n_candidatos: int) -> int:
+
+        # Si el usuario nos pasa 0, 0.0 o None, apagamos el 2-opt
+        if not self.num_soluciones_corregir:
+            return 0
+
+        # Comprobamos si es un porcentaje (float)
+        if isinstance(self.num_soluciones_corregir, float):
+
+            # Calculamos la fraccion y aseguramos que al menos devuelva 3 (el minimo pedido)
+            return max(3, int(n_candidatos * self.num_soluciones_corregir))
+        
+        # Comprobamos si es un numero exacto (int)
+        elif isinstance(self.num_soluciones_corregir, int):
+
+            # Devolvemos el numero de soluciones (minimo, el numero de candidatos. No recomendado)
+            return min(n_candidatos, self.num_soluciones_corregir)
+            
+        # Por defecto sacamos 0
+        return 0
 
     # Funcion que gestiona la aplicacion del 2-opt intra-ruta a los mejores
     def _aplicar_2_opt_global(self, fitness_crudo: list, rutas_reales: list) -> None:
@@ -170,7 +198,7 @@ class BasePSO(benchmarks.Benchmark, ABC):
                 for k in range(j + 1, len(sub_ruta) - 1):
                     
                     # Si invertir el segmento acorta la distancia, lo aplicamos
-                    if self._calcula_mejora_2opt(sub_ruta, j, k):
+                    if self._calcula_mejora_2_opt(sub_ruta, j, k):
                         sub_ruta[j:k + 1] = reversed(sub_ruta[j:k + 1])
                         mejora = True
 
@@ -178,7 +206,12 @@ class BasePSO(benchmarks.Benchmark, ABC):
         return sub_ruta
     
     # Funcion para evaluar si un cambio 2-opt reduce la distancia
-    def _calcula_mejora_2opt(self, sub_ruta: list, nodo_i: int, nodo_j: int) -> bool:
+    def _calcula_mejora_2_opt(
+        self,
+        sub_ruta: list,
+        nodo_i: int,
+        nodo_j: int
+    ) -> bool:
 
         # Nodos implicados
         nodo_primero: int = sub_ruta[nodo_i - 1]
@@ -200,10 +233,10 @@ class BasePSO(benchmarks.Benchmark, ABC):
         
         # Centralizamos aqui el ajuste de indices
         id_nodo_a: int = self.datos_problema.node_ids.index(nodo_a)
-        id_nodo__b: int = self.datos_problema.node_ids.index(nodo_b)
+        id_nodo_b: int = self.datos_problema.node_ids.index(nodo_b)
         
         # Retornamos la distancia consultando la matriz precalculada
-        return self.datos_problema.distance_matrix[id_nodo_a][id_nodo__b]
+        return self.datos_problema.distance_matrix[id_nodo_a][id_nodo_b]
 
     # Funcion interna para transformar continuos a discretos
     def _decodificar_spv(self, candidato: list) -> list:

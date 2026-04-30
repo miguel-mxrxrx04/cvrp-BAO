@@ -2,17 +2,17 @@
 import numpy as np  # Manejo eficiente de vectores numéricos
 import matplotlib.pyplot as plt  # Para la generacion de graficos
 
-from src.common.base_algorithm import BaseAlgorithm  # Clase que usaremos para las estadisticas (tendra los resultados de las ejecuciones)
+from src.common.problem import CVRPProblem  # Clase que usaremos para las estadisticas (tendra los resultados de las ejecuciones)
 
 
 # Clase encargada de toda la visualizacion de datos
 class VisualizadorCVRP:
     
     # Constructor que inicializa el visualizador con el mapa del problema
-    def __init__(self, algoritmo_ejecutado: BaseAlgorithm):
+    def __init__(self, problema: CVRPProblem):
         
         # Almacenamos la instancia original para acceder a las coordenadas
-        self.algoritmo_ejecutado = algoritmo_ejecutado
+        self.problema = problema
         
         # Definimos una paleta de 20 colores para diferenciar los vehiculos
         self.paleta_colores = plt.cm.tab20.colors
@@ -92,24 +92,24 @@ class VisualizadorCVRP:
         plt.show()
 
     # Funcion para dibujar el mapa fisico con las rutas sin cruces
-    def dibujar_rutas(self, ruta_decodificada: list, titulo: str = "Mapa de Rutas Optimizadas") -> None:
+    def dibujar_rutas(self, ruta_decodificada: list, titulo: str='Mapa de Rutas Optimizadas') -> None:
         
         # Creamos un lienzo grande para el mapa
         plt.figure(figsize=(12, 8))
         
         # Dibujamos todos los clientes como puntos de fondo grises
-        for nodo_id, coords in self.algoritmo_ejecutado.nodes.items():
+        for nodo_id, coords in self.problema.nodes.items():
             
             # Omitimos el deposito para pintarlo diferente despues
-            if nodo_id != self.algoritmo_ejecutado.depot_id:
+            if nodo_id != self.problema.depot_id:
                 plt.scatter(coords[0], coords[1], c='gray', s=30, alpha=0.5)
                 
         # Obtenemos y dibujamos el deposito central como un cuadrado rojo grande
-        coord_deposito: tuple = self.algoritmo_ejecutado.nodes[self.algoritmo_ejecutado.depot_id]
+        coord_deposito: tuple = self.problema.nodes[self.problema.depot_id]
         plt.scatter(coord_deposito[0], coord_deposito[1], c='red', marker='s', s=150, label='Depósito Central', zorder=5)
         
         # Extraemos las posiciones del deposito para separar los viajes
-        indices_deposito: list = [i for i, x in enumerate(ruta_decodificada) if x == self.algoritmo_ejecutado.depot_id]
+        indices_deposito: list = [i for i, x in enumerate(ruta_decodificada) if x == self.problema.depot_id]
         
         # Contador para asignar colores secuenciales
         num_camion: int = 0
@@ -126,8 +126,8 @@ class VisualizadorCVRP:
             if len(viaje) > 2:
                 
                 # Extraemos listas de coordenadas X e Y
-                coordenadas_x: list = [self.algoritmo_ejecutado.nodes[nodo][0] for nodo in viaje]
-                coordenadas_y: list = [self.algoritmo_ejecutado.nodes[nodo][1] for nodo in viaje]
+                coordenadas_x: list = [self.problema.nodes[nodo][0] for nodo in viaje]
+                coordenadas_y: list = [self.problema.nodes[nodo][1] for nodo in viaje]
                 
                 # Asignamos el color ciclico segun el indice
                 color_camion: tuple = self.paleta_colores[num_camion % len(self.paleta_colores)]

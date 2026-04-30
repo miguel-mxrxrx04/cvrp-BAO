@@ -3,6 +3,7 @@ import numpy as np  # Manejo eficiente de vectores numericos
 
 from inspyred.ec import Individual  # Para definir el tipado del mejor individuo
 from abc import ABC, abstractmethod  # Modulos para crear clases abstractas
+from src.pso.base_pso import BasePSO  # Clase que sera el problema con las configuraciones necesarias
 
 
 # Definimos la clase abstracta padre para todos los algoritmos
@@ -19,6 +20,9 @@ class BaseAlgorithm(ABC):
         self.historico_fitness_mejor: list = []
         self.historico_fitness_media: list = []
         self.historico_diversidad: list = []
+
+        # Variable para guardar el fitness de la poblacion final
+        self.fitness_poblacion_final: list = []
         
         # Variable para almacenar las mejores soluciones
         self.mejores_soluciones: list = []
@@ -27,7 +31,7 @@ class BaseAlgorithm(ABC):
     def _observer_fitness_diversidad(self, population: list, num_generations: int, num_evaluations: int, args: dict) -> None:
         
         # Extraemos y guardamos el mejor fitness de esta generacion
-        mejor_individuo = max(population)
+        mejor_individuo = min(population, key=lambda ind: ind.fitness)
         self.historico_fitness_mejor.append(mejor_individuo.fitness)
         
         # Calculamos y guardamos el fitness medio de todo el enjambre actual
@@ -46,10 +50,11 @@ class BaseAlgorithm(ABC):
         self.historico_fitness_media: list = []
         self.historico_diversidad: list = []        
         self.mejores_soluciones: list = []
+        self.fitness_poblacion_final: list = []
 
     # Funcion que ejecuta el algorithmo
     @abstractmethod
-    def ejecutar(self, problema) -> None:
+    def ejecutar(self, config_algorithm: BasePSO) -> None:
         
         # Obligamos a su implementacion en las clases hijas
         pass

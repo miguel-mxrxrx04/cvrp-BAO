@@ -10,12 +10,17 @@ from src.pso.base_pso import BasePSO  # Clase que sera el problema con las confi
 class PSOAlgorithm(BaseAlgorithm):
     
     # Constructor que inicializa los parametros del PSO y de la clase padre
-    def __init__(self,
-                    tamano_poblacion: int, max_evaluaciones: int,
-                    inercia: float=0.7, cognitivo: float=1.5,
-                    social: float=1.5, tamano_vecindario: int=5,
-                    semilla: int=42
-                ):
+    def __init__(
+        self,
+        tamano_poblacion: int,
+        max_evaluaciones: int,
+        inercia: float=0.7,
+        cognitivo: float=1.5,
+        social: float=1.5,
+        tamano_vecindario: int=5,
+        semilla: int=42,
+        verbose: bool=False
+    ):
         
         # Invocamos al constructor de la clase padre para establecer las listas y variables base
         super().__init__(tamano_poblacion, max_evaluaciones)
@@ -29,11 +34,23 @@ class PSOAlgorithm(BaseAlgorithm):
         # Inicializamos el motor aleatorio con la semilla para garantizar la repetibilidad
         self.generador_random: random.Random = random.Random(semilla)
 
+        # Bool para saber si usamos el observer o no
+        self.verbose: bool = verbose
+
     # Funcion para ejecutar el algoritmo
     def ejecutar(self, config_algorithm: BasePSO) -> None:
+
+        # Si no hay problema definido, no hacemos nada
+        if config_algorithm.datos_problema is None:
+
+            # Mensaje de error
+            if self.verbose:
+                print('No hay problema definido')
+            return
         
         # Informamos por consola del inicio de la configuracion
-        print('CONFIG PSO')
+        if self.verbose:
+            print('CONFIG PSO')
         
         # Inicializamos el enjambre de particulas pasandole nuestro generador aleatorio
         pso_algorithm: swarm.PSO = swarm.PSO(self.generador_random)
@@ -42,13 +59,17 @@ class PSOAlgorithm(BaseAlgorithm):
         pso_algorithm.terminator = ec.terminators.evaluation_termination
         
         # Asignamos los observers
-        pso_algorithm.observer = [self._observer_fitness_diversidad, ec.observers.stats_observer]
+        if self.verbose:
+            pso_algorithm.observer = [self._observer_fitness_diversidad, ec.observers.stats_observer]
+        else:
+            pso_algorithm.observer = [self._observer_fitness_diversidad]
 
         # Que cada clase haga las configuraciones que necesite
         config_algorithm.config_pso(pso_algorithm)
         
         # Informamos del inicio de las iteraciones
-        print(f'Launching PSO ({self.max_evaluaciones} evals)')
+        if self.verbose:
+            print(f'Launching PSO ({self.max_evaluaciones} evals)')
         
         # Ejecutamos el motor pasando las reglas del problema y los parametros de vuelo
         poblacion_final: list = pso_algorithm.evolve(
@@ -65,8 +86,12 @@ class PSOAlgorithm(BaseAlgorithm):
         )
         
         # Seleccionamos y guardamos la particula con el fitness mas optimo del resultado
-        self.mejores_soluciones = self.mejores_soluciones = sorted(poblacion_final, key=lambda x: x.fitness)[:3]
+        self.mejores_soluciones = sorted(poblacion_final, key=lambda x: x.fitness)[:3]
+
+        # Guardamos el fitness de las particulas para el Histograma y Box-plot
+        self.fitness_poblacion_final = [ind.fitness for ind in poblacion_final]
         
         # Notificamos mejores fitness encontrados
         for i, solucion in enumerate(self.mejores_soluciones):
-            print(f'Best solution #{i + 1}: {solucion.fitness}')
+            if self.verbose:
+                print(f'Best solution #{i + 1}: {solucion.fitness}')

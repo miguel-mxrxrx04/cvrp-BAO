@@ -2,9 +2,10 @@
 import math  # Modulo matematico 
 import numpy as np  # Manejo eficiente de vectores numericos
 
-from typing import Optional  # Para que variables esten a none
 from inspyred import swarm  # Necesario para cambiar la topologia a estrella
+from typing import Optional  # Para que variables esten a none
 from src.pso.base_pso import BasePSO  # Nuestra clase padre abstracta
+from src.common.problem import CVRPProblem  # Clase que define el problema a resolver
 
 
 # Definimos la clase hija exclusiva para la tecnica Secuencial (El Mapa de Crateres)
@@ -12,17 +13,21 @@ class SequentialPSO(BasePSO):
 
     # Constructor que añade los parametros exclusivos de esta tecnica
     def __init__(
-            self, datos_problema, umbral_similitud: float=0.8,
-            penalizacion: float=float('inf'),
-            num_soluciones_corregir: float=0.05
-        ):
+        self,
+        datos_problema: CVRPProblem=None,
+        umbral_similitud: float=0.8,
+        penalizacion: Optional[float]=None,
+        num_soluciones_corregir= None
+    ):
         
         # Invocamos al constructor del padre para inicializar lo basico
         super().__init__(datos_problema, num_soluciones_corregir)
         
         # Asignamos el limite de similitud (ej. 0.8 significa 80% de calles iguales) y el castigo
         self.umbral_similitud: float = umbral_similitud
-        self.penalizacion: float = penalizacion
+
+        # Calculamos la penalizacion como la distancia maxima existente en el mapa
+        self.penalizacion: float = np.max(datos_problema.distance_matrix) if penalizacion is None else penalizacion
 
         # Tupla para guardar (fitness, ruta_decodificada) de la mejor solucion local
         self.mejor_local: Optional[tuple] = None
@@ -30,10 +35,23 @@ class SequentialPSO(BasePSO):
         # Lista con las RUTAS DECODIFICADAS optimas encontradas en iteraciones anteriores
         self.optimos_encontrados: list = []
 
+    # Funcion que devuelve los parametros de la configuracion
+    def get_params_configuracion(self) -> dict:
+
+        # Llamamos la funcion padre
+        config_params: dict = super().get_params_configuracion()
+
+        # Añadimos los que falta
+        config_params['umbral_similitud'] = self.umbral_similitud
+        config_params['penalizacion'] = self.penalizacion
+
+        # Lo devolvemos
+        return config_params
+
     # Funcion que configura el pso dependiendo de los datos
     def config_pso(self, algoritmo: swarm.PSO) -> None:
         
-        # El secuencial necesita convergencia rapida para aniquilar zonas, usamos Estrella
+        # Lo ponemos en estrella porque sacaremos el mejor (evitamos que solo se comparta informacion con los vecinos mas cercanos)
         algoritmo.topology = swarm.topologies.star_topology
 
         # Vemos si hemos ejecutado ya el algoritmo (tenemos un mejor local guardado)
@@ -45,8 +63,20 @@ class SequentialPSO(BasePSO):
         # Reiniciamos el rastreador local para la siguiente iteracion del enjambre
         self.mejor_local = None
 
+    # Funcion que evalua los individuos con su fitness
+    def evaluator(self, candidates: list, args: dict) -> list:
+
+        # Aplicamos la funcion del padre
+        fitness_base: list = super().evaluator(candidates, args)
+
+        # Aplicamos penalizaciones (para obtener multiples soluciones con fitness sharing, clearing, etc)
+        fitness_penalizado: np.ndarray = self._aplicar_penalizacion(fitness_base, candidates)
+
+        # Retornamos directamente la lista de distancias sin alterar
+        return fitness_penalizado.tolist()
+
     # Implementamos obligatoriamente la penalizacion comparando calles reales en vez de decimales
-    def _aplicar_penalizacion(self, fitness_base: np.ndarray, candidatos: list) -> np.ndarray:
+    def _aplicar_penalizacion(self, fitness_base: list, candidatos: list) -> np.ndarray:
         
         # Inicializamos el vector de salida copiando el original
         fitness_final: np.ndarray = np.copy(fitness_base)
@@ -54,7 +84,7 @@ class SequentialPSO(BasePSO):
         # Comprobamos cada particula actual contra el archivo historico de rutas prohibidas
         for i, cand in enumerate(candidatos):
             
-            # Paso 1: Decodificamos la particula continua para ver que ruta fisica va a hacer
+            # Decodificamos la particula continua para ver que ruta fisica va a hacer
             ruta_cand: list = self._decodificar_spv(cand)
             
             # Iteramos por las rutas optimas descubiertas en vuelos anteriores
