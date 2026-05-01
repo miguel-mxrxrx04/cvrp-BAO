@@ -56,7 +56,7 @@ class PSOAlgorithm(BaseAlgorithm):
         pso_algorithm: swarm.PSO = swarm.PSO(self.generador_random)
         
         # Establecemos la condicion de parada estricta basada en el limite de evaluaciones
-        pso_algorithm.terminator = ec.terminators.evaluation_termination
+        pso_algorithm.terminator = ec.terminators.no_improvement_termination
         
         # Asignamos los observers
         if self.verbose:
@@ -84,6 +84,10 @@ class PSOAlgorithm(BaseAlgorithm):
             social_rate=self.social,
             neighborhood_size=self.tamano_vecindario
         )
+
+        # Actualizamos el numero de evaluaciones y generaciones reales
+        self.num_evaluaciones = pso_algorithm.num_evaluations
+        self.num_iteraciones = pso_algorithm.num_generations
         
         # Seleccionamos y guardamos la particula con el fitness mas optimo del resultado
         self.mejores_soluciones = sorted(poblacion_final, key=lambda x: x.fitness)[:3]

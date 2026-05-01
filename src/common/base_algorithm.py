@@ -15,6 +15,12 @@ class BaseAlgorithm(ABC):
         # Asignamos los parametros fisicos base de la ejecucion
         self.tamano_poblacion: int = tamano_poblacion
         self.max_evaluaciones: int = max_evaluaciones
+
+        # Por defecto, suponemos que el numero de evaluaciones sera el maximo
+        self.num_evaluaciones: int = self.max_evaluaciones
+
+        # Por defecto, suponemos que el numero de generaciones (iteraciones) sera las evaluaciones maximas partida del tamaño de la poblacion
+        self.num_iteraciones: int = int(self.max_evaluaciones / self.tamano_poblacion)
         
         # Listas donde guardaremos los datos estadisticos para el Visualizador
         self.historico_fitness_mejor: list = []
@@ -46,6 +52,8 @@ class BaseAlgorithm(ABC):
     def clear(self) -> None:
 
         # Limpiamos todo
+        self.num_evaluaciones: int = self.max_evaluaciones
+        self.num_iteraciones: int = int(self.max_evaluaciones / self.tamano_poblacion)
         self.historico_fitness_mejor: list = []
         self.historico_fitness_media: list = []
         self.historico_diversidad: list = []        

@@ -47,6 +47,10 @@ class SequentialPSOAlgorithm(PSOAlgorithm):
                 print('No hay problema definido')
             return
 
+        # Lista que almacena las evaluaciones y generaciones de cada iteracion
+        num_evaluaciones_iteracion: list = []
+        num_generaciones_iteracion: list = []
+
         # Lista temporal para ir acumulando las poblaciones de cada nicho
         poblacion_acumulada: list = []
         
@@ -60,8 +64,16 @@ class SequentialPSOAlgorithm(PSOAlgorithm):
             # Hacemos la evalucion de un PSO
             super().ejecutar(config_algorithm)
 
+            # Guardamos las evaluaciones y generaciones
+            num_evaluaciones_iteracion.append(self.num_evaluaciones)
+            num_generaciones_iteracion.append(self.num_iteraciones)
+
             # Guardamos la poblacion final
             poblacion_acumulada.extend(self.fitness_poblacion_final)
+
+        # Sacamos la media de las iteraciones y evaluaciones de las n pasadas
+        self.num_evaluaciones = sum(num_evaluaciones_iteracion)
+        self.num_iteraciones = sum(num_generaciones_iteracion)
 
         # Asignamos todas las poblaciones finales
         self.fitness_poblacion_final = poblacion_acumulada

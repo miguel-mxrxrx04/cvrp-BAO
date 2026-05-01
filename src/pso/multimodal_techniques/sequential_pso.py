@@ -85,7 +85,7 @@ class SequentialPSO(BasePSO):
         for i, cand in enumerate(candidatos):
             
             # Decodificamos la particula continua para ver que ruta fisica va a hacer
-            ruta_cand: list = self._decodificar_spv(cand)
+            ruta_cand: list = self.decodificar_spv(cand)
             
             # Iteramos por las rutas optimas descubiertas en vuelos anteriores
             for ruta_optima in self.optimos_encontrados:
@@ -144,7 +144,7 @@ class SequentialPSO(BasePSO):
             mejor_candidato_actual: list = candidatos[indice_mejor]
             
             # Lo decodificamos a ruta fisica al instante para guardarlo
-            mejor_ruta_fisica: list = self._decodificar_spv(mejor_candidato_actual)
+            mejor_ruta_fisica: list = self.decodificar_spv(mejor_candidato_actual)
             
             # Sobreescribimos el mejor local con la nueva tupla (fitness, ruta_fisica)
             self.mejor_local = (mejor_fitness_actual, mejor_ruta_fisica)

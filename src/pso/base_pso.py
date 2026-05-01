@@ -64,11 +64,11 @@ class BasePSO(benchmarks.Benchmark):
     def get_ruta_particula(self, particula: ec.Individual) -> list:
 
         # Obtenemos el fenotipo
-        fenotipo_particula: list = self._decodificar_spv(particula.candidate)
+        fenotipo_particula: list = self.decodificar_spv(particula.candidate)
 
         # Aplicamos el 2-opt si lo piden
         if self.num_soluciones_corregir:
-            fenotipo_particula: list = self._aplicar_2_opt_ruta(fenotipo_particula)
+            fenotipo_particula: list = self.aplicar_2_opt_ruta(fenotipo_particula)
 
         # Devolvemos el fenotipo (pasamos de genotipo a fenotipo)
         return fenotipo_particula
@@ -95,7 +95,7 @@ class BasePSO(benchmarks.Benchmark):
         for candidato in candidates:
             
             # Convertimos el vector real en una ruta discreta (SPV)
-            ruta_bruta: list = self._decodificar_spv(candidato)
+            ruta_bruta: list = self.decodificar_spv(candidato)
             rutas_reales.append(ruta_bruta)
             
             # Obtenemos la distancia de la ruta ya optimizada
@@ -148,14 +148,14 @@ class BasePSO(benchmarks.Benchmark):
             for candidato in mejores_candidatos:
 
                 # Limpiamos la ruta
-                ruta_limpia: list = self._aplicar_2_opt_ruta(rutas_reales[candidato])
+                ruta_limpia: list = self.aplicar_2_opt_ruta(rutas_reales[candidato])
                 
                 # Actualizamos la ruta real y recalculamos su coste
                 rutas_reales[candidato] = ruta_limpia
                 fitness_crudo[candidato] = self.datos_problema.evaluate_route_distance(ruta_limpia)
 
     # Funcion que divide el Tour Gigante en camiones individuales para limpiarlos
-    def _aplicar_2_opt_ruta(self, ruta: list) -> list:
+    def aplicar_2_opt_ruta(self, ruta: list) -> list:
         
         # Extraemos las posiciones de los depositos en la ruta
         indices_deposito: list = [i for i, x in enumerate(ruta) if x == self.datos_problema.depot_id]
@@ -239,7 +239,7 @@ class BasePSO(benchmarks.Benchmark):
         return self.datos_problema.distance_matrix[id_nodo_a][id_nodo_b]
 
     # Funcion interna para transformar continuos a discretos
-    def _decodificar_spv(self, candidato: list) -> list:
+    def decodificar_spv(self, candidato: list) -> list:
         
         # Obtenemos los indices que ordenarian el arreglo ascendentemente
         indices_ordenados: np.ndarray = np.argsort(candidato)

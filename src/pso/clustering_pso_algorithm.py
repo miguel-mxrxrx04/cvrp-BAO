@@ -202,6 +202,7 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
         problema: ClusterCVRPProblem,
         solucion: list
     ) -> float:
+
         # Aplanamos la solucion para que el evaluador la entienda
         ruta_plana: list = []
         
@@ -276,10 +277,14 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
         # Lista para acumular todas las poblaciones
         fitness_total_zona: list = []
 
-        # Lista que almacenara el fitness y diversidad de cada ejecucion
+        # Valores que almacenaran el fitness y diversidad de cada ejecucion
         total_mejor_fitness: list = []
         total_media_fitness: list = []
         total_diversidad: list = []
+
+        # Lista para guardar el numero de evaluaciones y generaciones del cluster
+        total_evaluaciones_cluster: int = 0
+        total_iteraciones_cluster: int = 0
         
         # Bucle Secuencial: Las iteraciones dependen del tiempo, se hacen una tras otra en el mismo nucleo
         for _ in range(self.num_ejecuciones):
@@ -310,6 +315,8 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
             total_mejor_fitness.append(motor_local.historico_fitness_mejor)
             total_media_fitness.append(motor_local.historico_fitness_media)
             total_diversidad.append(motor_local.historico_diversidad)
+            total_evaluaciones_cluster += motor_local.num_evaluaciones
+            total_iteraciones_cluster += motor_local.num_iteraciones
             fitness_total_zona.extend(motor_local.fitness_poblacion_final)
             
             # Obtenemos una lista con los caminos de los camiones
@@ -335,18 +342,27 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
                     
             # Guardamos la bolsa de camiones de esta iteracion
             caminos_por_iteracion.append(caminos_solucion)
+
+        # Si por casualidad, se para el algoritmo, rellenamos las listas para evitar errores
+        total_mejor_fitness = self._igualar_longitudes(total_mejor_fitness)
+        total_media_fitness = self._igualar_longitudes(total_media_fitness)
+        total_diversidad = self._igualar_longitudes(total_diversidad)
             
         # Sacamos la media de los historicos
         mean_total_mejor_fitness: list = np.mean(total_mejor_fitness, axis=0).tolist()
         mean_total_media_fitness: list = np.mean(total_media_fitness, axis=0).tolist()
         mean_total_diversidad: list = np.mean(total_diversidad, axis=0).tolist()
         
-        # Retornamos la matriz de camiones (3 iteraciones x N camiones) y los historicos de fitness (mejor y medio) y diversidad
+        # Retornamos la matriz de camiones
+        # (M iteraciones x N camiones), los historicos de fitness (mejor y medio),
+        # diversidad, las evalaciones y generaciones y el fitness de todas las particulas de la poblacion final (box-plot e histograma)
         return (
             caminos_por_iteracion,
             mean_total_mejor_fitness,
             mean_total_media_fitness,
             mean_total_diversidad,
+            total_evaluaciones_cluster,
+            total_iteraciones_cluster,
             fitness_total_zona
         )
 
@@ -361,6 +377,10 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
         # Preparamos N listas vacias por caminos encontrados
         caminos_totales: list = [[] for _ in range(self.num_ejecuciones)]
 
+        # Lista para guardar el numero de evaluaciones y generaciones global
+        total_evaluaciones: int = 0
+        total_iteraciones: int = 0
+
         # Lista con el fitness de la poblacion (global, para graficas estadisticas)
         fitness_poblacion_global: list = []
 
@@ -371,14 +391,27 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
 
         # Iteramos por cada sub-problema (zona) procesandolas una tras otra
         for i, problema in enumerate(sub_problemas):
-
-            # Resolvemos la zona actual en el hilo principal
-            caminos_zonas, best_fitness_zona, mean_fitness_zona, diversidad_zona, fitness_poblacion_zona = self._resolver_zona_completa(
+            
+            # Desempaquetamos todo
+            resultado_zona: tuple = self._resolver_zona_completa(
                 zona_id=i,
                 problema_local=problema,
                 parametros_config_pso=parametros_config_pso,
                 depot_id=depot_id
             )
+
+            # Asignamos a cada uno su valor
+            caminos_zonas: list = resultado_zona[0]
+            best_fitness_zona: list = resultado_zona[1]
+            mean_fitness_zona: list = resultado_zona[2]
+            diversidad_zona: list = resultado_zona[3]
+            evals_zona: int = resultado_zona[4]
+            iters_zona: int = resultado_zona[5]
+            fitness_poblacion_zona: list = resultado_zona[6]
+
+            # Actualizamos evaluadores y generaciones
+            total_evaluaciones += evals_zona
+            total_iteraciones += iters_zona
 
             # Guardamos el historial de esta zona para hacer la media luego
             historial_mejor_fitness_zonas.append(best_fitness_zona)
@@ -389,6 +422,15 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
             # Repartimos los camiones devueltos en su lista global correspondiente
             for it in range(self.num_ejecuciones):
                 caminos_totales[it].extend(caminos_zonas[it])
+
+        # Asignamos el computo total a la instancia
+        self.num_evaluaciones = total_evaluaciones
+        self.num_iteraciones = total_iteraciones
+
+        # Si por casualidad, se para el algoritmo, rellenamos las listas para evitar errores
+        historial_mejor_fitness_zonas = self._igualar_longitudes(historial_mejor_fitness_zonas)
+        historial_media_fitness_zonas = self._igualar_longitudes(historial_media_fitness_zonas)
+        historial_diversidad_zonas = self._igualar_longitudes(historial_diversidad_zonas)
 
         # Hacemos la media vertical del fitness y diversidad
         historial_mean_best_fitness: list = np.sum(historial_mejor_fitness_zonas, axis=0).tolist()
@@ -416,10 +458,14 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
         # Preparamos N listas vacias por caminos encontrados
         caminos_totales: list = [[] for _ in range(self.num_ejecuciones)]
 
+        # Lista para guardar el numero de evaluaciones y generaciones global
+        total_evaluaciones: int = 0
+        total_iteraciones: int = 0
+
         # Lista con el fitness de la poblacion (global, para graficas estadisticas)
         fitness_poblacion_global: list = []
 
-        # Dejamos 2 hilos libres para que el sistema operativo y VSC no se congelen
+        # Dejamos 3 hilos libres para que el sistema operativo y VSC no se congelen
         n_hilos_seguros: int = max(1, os.cpu_count() - 3)
         
         # Levantamos el Pool de procesos
@@ -445,8 +491,21 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
             # A medida que los nucleos van terminando todo su trabajo, recogemos los resultados
             for futuro in concurrent.futures.as_completed(futuros):
                 
-                # Extraemos los resultados de la solucion de la zona (iterado n veces)
-                caminos_zonas, best_fitness_zona, mean_fitness_zona, diversidad_zona, fitness_poblacion_zona = futuro.result()
+                # Desempaquetamos todo desde la promesa resuelta
+                resultado_zona: tuple = futuro.result()
+
+                # Asignamos a cada uno linea a linea con el tipado
+                caminos_zonas: list = resultado_zona[0]
+                best_fitness_zona: list = resultado_zona[1]
+                mean_fitness_zona: list = resultado_zona[2]
+                diversidad_zona: list = resultado_zona[3]
+                evals_zona: int = resultado_zona[4]
+                iters_zona: int = resultado_zona[5]
+                fitness_poblacion_zona: list = resultado_zona[6]
+
+                # Actualizamos evaluadores y generaciones de forma segura en el hilo principal
+                total_evaluaciones += evals_zona
+                total_iteraciones += iters_zona
 
                 # Guardamos el historial de esta zona para hacer la media luego
                 historial_mejor_fitness_zonas.append(best_fitness_zona)
@@ -457,6 +516,15 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
                 # Repartimos los camiones devueltos en su lista global correspondiente
                 for it in range(self.num_ejecuciones):
                     caminos_totales[it].extend(caminos_zonas[it])
+
+        # Asignamos el computo total a la instancia una vez terminados todos los procesos
+        self.num_evaluaciones = total_evaluaciones
+        self.num_iteraciones = total_iteraciones
+
+        # Si por casualidad, se para el algoritmo, rellenamos las listas para evitar errores
+        historial_mejor_fitness_zonas = self._igualar_longitudes(historial_mejor_fitness_zonas)
+        historial_media_fitness_zonas = self._igualar_longitudes(historial_media_fitness_zonas)
+        historial_diversidad_zonas = self._igualar_longitudes(historial_diversidad_zonas)
 
         # Hacemos la media vertical del fitness y diversidad
         historial_mean_best_fitness: list = np.sum(historial_mejor_fitness_zonas, axis=0).tolist()
@@ -472,3 +540,16 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
             historial_mean_diversidad,
             historial_fitness_poblacion_global
         )
+
+    # Funcion para igualar el tamaño de los historiales rellenando con el ultimo valor (Padding)
+    def _igualar_longitudes(self, historicos: list) -> list:
+
+        # Prevenimos listas vacias
+        if not historicos or not any(historicos):
+            return historicos
+            
+        # Obtenemos la longitud del historial que mas ha durado
+        max_len: int = max(len(h) for h in historicos)
+        
+        # Rellenamos los historiales cortos copiando su ultimo valor hasta igualar al maximo
+        return [h + [h[-1]] * (max_len - len(h)) if h else [] for h in historicos]

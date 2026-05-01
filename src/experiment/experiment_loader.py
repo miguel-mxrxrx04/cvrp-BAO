@@ -29,7 +29,7 @@ class ExperimentLoader:
         for f in files:
 
             # Leemos el archivo csv actual y lo convertimos en un dataframe de pandas
-            actual_data: pd.DataFrame = pd.read_csv(f'{self.experiment_folder}/{f}')
+            actual_data: pd.DataFrame = pd.read_csv(join(self.experiment_folder, f))
 
             # Agregamos el dataframe actual a la lista de acumulacion
             data.append(actual_data)

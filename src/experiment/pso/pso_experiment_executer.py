@@ -4,6 +4,7 @@ import time  # Modulo estandar para medir tiempos de ejecucion del codigo
 import copy  # Para sacar copias
 import shutil  # Libreria estandar para borrado de directorios con contenido
 import random  # Clase para sacar numeros aleatorios
+import numpy as np  # Libreria para el manejo de arrays eficiente y operaciones matematicas
 import pandas as pd  # Libreria externa para manipulacion y creacion de dataframes
 import concurrent.futures  # Para hacerlo paralelo
 
@@ -161,17 +162,75 @@ class PSOExperimentExecuter:
         # Calculamos el tiempo total transcurrido
         tiempo_ejecucion: float = time.time() - inicio_tiempo
 
-        # Extraemos el mejor fitness alcanzado (el ultimo valor guardado en el historico)
-        mejor_fitness_corrida: float = algoritmo_ejecutado.historico_fitness_mejor[-1]
+        # Sacamos datos para el csv
+        datos_csv: tuple = self._sacar_datos_csv(algoritmo_ejecutado, pso_config)
 
         # Estructuramos y devolvemos el diccionario con las metricas solicitadas
         return {
             'run': run_id,
-            'fitness': mejor_fitness_corrida,
-            'n_evaluations': algoritmo_ejecutado.max_evaluaciones,
+            'mean_fitness': datos_csv[0],
+            'std_fitness': datos_csv[1],
+            'mean_jaccard_distance': datos_csv[2],
+            'n_evaluations': algoritmo_ejecutado.num_evaluaciones,
+            'n_generations': algoritmo_ejecutado.num_iteraciones,
             'experiment_id': nombre_problema.split('.')[0],
             'tiempo': tiempo_ejecucion
         }
+
+    # Funcion principal que orquesta la extraccion de datos para el CSV
+    def _sacar_datos_csv(self, pso_algorithm: BaseAlgorithm, pso_config: BasePSO) -> tuple:
+        
+        # Si es una lista, estamos ante el Clustering. Si no, es el PSO Base (Individual)
+        es_clustering: bool = isinstance(pso_algorithm.mejores_soluciones[0], list)
+
+        # Delegamos la obtencion de fenotipos y fitness segun el tipo de algoritmo
+        if es_clustering:
+            rutas, fits = self._procesar_fenotipos_clustering(pso_algorithm.mejores_soluciones, pso_config)
+        else:
+            rutas, fits = self._procesar_fenotipos_pso(pso_algorithm.mejores_soluciones, pso_config)
+
+        # Delegamos el calculo de la diversidad estructural
+        mean_jaccard: float = self._calcular_diversidad_jaccard(rutas)
+
+        # Retornamos la tupla final (media_fitness, std_fitness, diversidad_media)
+        return (float(np.mean(fits)), float(np.std(fits)), mean_jaccard)
+
+    # Funcion especializada en decodificar y aplanar las soluciones de Clustering
+    def _procesar_fenotipos_clustering(self, soluciones: list, pso_config: BasePSO) -> tuple:
+        
+        # Aplanamos la estructura de camiones (Ejecucion -> Camion -> Nodo)
+        rutas_planas: list = [sum([v if i == 0 else v[1:] for i, v in enumerate(sol)], []) for sol in soluciones]
+        
+        # Evaluamos el coste real de cada ruta aplanada
+        fitness_list: list = [pso_config.datos_problema.evaluate_route_distance(r) for r in rutas_planas]
+        
+        # Devolvemos las rutas y su fitness
+        return rutas_planas, fitness_list
+
+    # Funcion especializada en decodificar los individuos del PSO Base
+    def _procesar_fenotipos_pso(self, individuos: list, pso_config: BasePSO) -> tuple:
+        
+        # Obtenemos el fenotipo real (ruta de nodos) mediante el decodificador de la configuracion
+        rutas_fenotipo: list = [pso_config.get_ruta_particula(ind) for ind in individuos]
+        
+        # Extraemos el fitness ya calculado en la particula
+        fitness_list: list = [ind.fitness for ind in individuos]
+        
+        # Devolvemos las rutas y su fitness
+        return rutas_fenotipo, fitness_list
+
+    # Funcion encargada de calcular la media de Jaccard entre todas las soluciones
+    def _calcular_diversidad_jaccard(self, rutas: list) -> float:
+        
+        # Generamos la lista de distancias comparando todos los pares posibles (sin repeticion)
+        n: int = len(rutas)
+        distancias: list = [
+            DiversityHandler.calculate_jaccard_distance(rutas[i], rutas[j]) 
+            for i in range(n) for j in range(i + 1, n)
+        ]
+        
+        # Retornamos el promedio (0.0 si no hay comparaciones disponibles)
+        return float(np.mean(distancias)) if distancias else 0.0
 
     # Funcion que ejecuta la bateria de experimentos de forma secuencial (clasica)
     def _run_repeated_sequential(
