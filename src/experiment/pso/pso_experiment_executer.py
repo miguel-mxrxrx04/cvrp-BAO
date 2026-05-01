@@ -35,23 +35,30 @@ class PSOExperimentExecuter:
         
         # Declaramos un diccionario base con los parametros estaticos
         parametros: dict = {
-            'tamano_poblacion': 40,
             'inercia': 0.7,
             'cognitivo': 1.5,
             'social': 1.5,
             'tamano_vecindario': 5
         }
-        
+
         # Escalado automatico evaluando la cantidad de nodos
-        if n_clientes <= 200:
+        if n_clientes <= 50:
+
+            # Asignamos el limite de evaluaciones para mapas pequeños o medianos
+            parametros['max_evaluaciones'] = 3000
+            parametros['tamano_poblacion'] = 20
+
+        elif n_clientes <= 200:
             
             # Asignamos el limite de evaluaciones para mapas pequeños o medianos
-            parametros['max_evaluaciones'] = 5000
+            parametros['max_evaluaciones'] = 10000
+            parametros['tamano_poblacion'] = 50
             
         else:
             
             # Asignamos un limite mayor de evaluaciones para mapas complejos
-            parametros['max_evaluaciones'] = 10000
+            parametros['max_evaluaciones'] = 30000
+            parametros['tamano_poblacion'] = 100
             
         # Devolvemos el diccionario perfectamente configurado
         return parametros
@@ -94,7 +101,7 @@ class PSOExperimentExecuter:
         nombre_problema: str,
         pso_algorithm: BaseAlgorithm,
         pso_config: BasePSO,
-        n_repeat: int=30
+        n_repeat: int=35
     ) -> pd.DataFrame:
         
         # Generamos una lista vacia para acumular los registros del muestreo estadistico
@@ -146,6 +153,7 @@ class PSOExperimentExecuter:
         experiment_folder: str,
         pso_algorithm: BaseAlgorithm,
         pso_config: BasePSO,
+        num_clientes_cluster: int=0,
         n_repeat: int=30,
         overwrite: bool=False
     ) -> None:
@@ -168,7 +176,7 @@ class PSOExperimentExecuter:
         for instancia in self.instancias_vrp:
             
             # Sondenamos el tamano del mapa real para ajustar el esfuerzo computacional
-            total_clientes: int = self._obtener_num_clientes(instancia)
+            total_clientes: int = self._obtener_num_clientes(instancia) if num_clientes_cluster == 0 else num_clientes_cluster
             
             # Calculamos dinamicamente los hiperparametros escalados
             parametros_escala: dict = self._calculate_params(total_clientes)

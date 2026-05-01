@@ -1,6 +1,7 @@
 # Librerias a usar
 import os  # Para uso de ficheros
 import numpy as np  # Libreria para usar vectores en C
+import random  # Libreria para sacar nuemros random para las semillas
 import concurrent.futures  # Modulo estandar para multiprocesamiento (Paralelismo real)
 
 from inspyred.ec import Individual  # Clase que es un individuo (particula)
@@ -120,24 +121,8 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
         if self.aplicar_reparacion:
 
             # Lista que tendra las mejores soluciones con reparacion
-            mejores_soluciones_reparadas: list = []
+            mejores_soluciones_reparadas: list = self._aplicar_reparacion_caminos(problema_principal)
             
-            # Bucle para aplicar la reparacion a las n mejores soluciones
-            for i, solucion in enumerate(self.mejores_soluciones):
-                
-                # Aplicamos la reparacion
-                ruta_reparada: list = JoinRoutes.consolidar_rutas(
-                    rutas_pso=solucion,
-                    demands=problema_principal.demands,
-                    capacity=problema_principal.capacity,
-                    limite_camiones=problema_principal.truck_limit,
-                    depot_id=problema_principal.depot_id,
-                    nodes=problema_principal.nodes
-                )
-
-                # Añadimos la solucion reparada junto con la sin reparar
-                mejores_soluciones_reparadas.append(ruta_reparada)
-
         # Mostramos las mejores soluciones
         for i, solucion in enumerate(self.mejores_soluciones):
 
@@ -151,26 +136,73 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
 
             # Si hemos reparado, lo mostramos tambien
             if self.aplicar_reparacion:
+
+                # Sacamos la solucion reparada
+                solucion_reparada: list = mejores_soluciones_reparadas[i]
+
                 self._mostrar_resultados(
                     problema=problema_principal,
                     limite_camiones=problema_principal.truck_limit,
                     id_solucion=i,
-                    solucion=mejores_soluciones_reparadas[i]
+                    solucion=solucion_reparada
                 )
 
-                # Reemplazamos las mejores soluciones por las reparadas
-                self.mejores_soluciones = mejores_soluciones_reparadas
+                # Reemplazamos la mejor solucion por la reparada en la lista oficial
+                self.mejores_soluciones[i] = solucion_reparada
 
-    # Funcion que muestra el mejor fitness con los camiones usados
-    def _mostrar_resultados(
+    # Funcion que aplica las reparaciones (join routes)
+    def _aplicar_reparacion_caminos(self, problema: ClusterCVRPProblem) -> list:
+        
+        # Lista que tendra las mejores soluciones con reparacion
+        mejores_soluciones_reparadas: list = []
+        
+        # Bucle para aplicar la reparacion a las n mejores soluciones
+        for i, solucion in enumerate(self.mejores_soluciones):
+            
+            # Aplicamos la reparacion
+            ruta_reparada: list = JoinRoutes.consolidar_rutas(
+                rutas_pso=solucion,
+                demands=problema.demands,
+                capacity=problema.capacity,
+                limite_camiones=problema.truck_limit,
+                depot_id=problema.depot_id,
+                nodes=problema.nodes
+            )
+
+            # Sacamos su fitness antiguo
+            fitness_ruta_antigua: float = self._obtener_fitness_cluster(problema, solucion)
+
+            # Sacamos su fitness nuevo
+            fitness_ruta_reparada: float = self._obtener_fitness_cluster(problema, ruta_reparada)
+
+            # Añadimos la solucion reparada junto con la sin reparar
+            mejores_soluciones_reparadas.append((ruta_reparada, fitness_ruta_reparada, fitness_ruta_antigua))
+
+            # Añadimos a la poblacion final
+            self.fitness_poblacion_final.append(fitness_ruta_reparada)
+        
+        # Sacamos la mejor de todas las reparadas
+        mejor_fitness_solucion_reparada: float = min(fit_n for _, fit_n, _ in mejores_soluciones_reparadas)
+
+        # Lo reemplazamos como el mejor historico de la ultima pasada
+        self.historico_fitness_mejor[-1] = mejor_fitness_solucion_reparada
+
+        # Calculamos la mejora total sumando las diferencias de cada reparacion
+        diferencia_total: float = sum(fit_n - fit_a for _, fit_n, fit_a in mejores_soluciones_reparadas)
+
+        # Actualizamos la media de la ultima pasada (Media = Media + Diferencia_Total / N)
+        self.historico_fitness_media[-1] += (diferencia_total / self.tamano_poblacion)
+
+        # Devolvemos las mejores soluciones
+        return [ruta for ruta, _, _ in mejores_soluciones_reparadas]
+
+    # Funcion que obtene el fitness del resultado del cluster
+    def _obtener_fitness_cluster(
         self,
         problema: ClusterCVRPProblem,
-        limite_camiones: int,
-        id_solucion: int,
-        solucion: list,
-    ) -> None:
-        
-        # Aplanamos la solucion para que el evaluador la entienda ---
+        solucion: list
+    ) -> float:
+        # Aplanamos la solucion para que el evaluador la entienda
         ruta_plana: list = []
         
         # Iteramos por cada viaje individual (camion)
@@ -184,8 +216,20 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
             else:
                 ruta_plana.extend(viaje[1:])
 
+        # Devolvemos el fitness
+        return problema.evaluate_route_distance(ruta_plana)
+
+    # Funcion que muestra el mejor fitness con los camiones usados
+    def _mostrar_resultados(
+        self,
+        problema: ClusterCVRPProblem,
+        limite_camiones: int,
+        id_solucion: int,
+        solucion: list,
+    ) -> None:
+        
         # Calculamos el fitness usando la ruta ya aplanada
-        fitness_solucion: float = problema.evaluate_route_distance(ruta_plana)
+        fitness_solucion: float = self._obtener_fitness_cluster(problema, solucion)
 
         # Extraemos el numero de camiones usados (la cantidad de sub-listas)
         camiones_usados: int = len(solucion)
@@ -208,6 +252,9 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
         depot_id: int
     ) -> tuple:
 
+        # Semilla aleatoria (evitamos que los numeros aleatorios sean el mismo)
+        semilla: int = random.SystemRandom().randint(0, 9999999) + zona_id
+
         # Creamos el motor
         motor_local: PSOAlgorithm = PSOAlgorithm(
             tamano_poblacion=self.tamano_poblacion,
@@ -216,6 +263,7 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
             cognitivo=self.cognitivo,
             social=self.social,
             tamano_vecindario=self.tamano_vecindario,
+            semilla=semilla,
             verbose=self.verbose
         )
         
@@ -225,7 +273,7 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
         # Lista que guarda los caminos de los camiones en cada iteracion
         caminos_por_iteracion: list = []
 
-        # Lista para acumular todas las poblaciones de las N ejecuciones
+        # Lista para acumular todas las poblaciones
         fitness_total_zona: list = []
 
         # Lista que almacenara el fitness y diversidad de cada ejecucion
@@ -336,16 +384,17 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
             historial_mejor_fitness_zonas.append(best_fitness_zona)
             historial_media_fitness_zonas.append(mean_fitness_zona)
             historial_diversidad_zonas.append(diversidad_zona)
-            fitness_poblacion_global.extend(fitness_poblacion_zona)
+            fitness_poblacion_global.append(fitness_poblacion_zona)
             
             # Repartimos los camiones devueltos en su lista global correspondiente
             for it in range(self.num_ejecuciones):
                 caminos_totales[it].extend(caminos_zonas[it])
 
         # Hacemos la media vertical del fitness y diversidad
-        historial_mean_best_fitness: list = np.mean(historial_mejor_fitness_zonas, axis=0).tolist()
-        historial_mean_media_fitness: list = np.mean(historial_media_fitness_zonas, axis=0).tolist()
+        historial_mean_best_fitness: list = np.sum(historial_mejor_fitness_zonas, axis=0).tolist()
+        historial_mean_media_fitness: list = np.sum(historial_media_fitness_zonas, axis=0).tolist()
         historial_mean_diversidad: list = np.mean(historial_diversidad_zonas, axis=0).tolist()
+        historial_fitness_poblacion_global: list = np.sum(fitness_poblacion_global, axis=0).tolist()
                 
         # Devolvemos las bolsas ensambladas listas para JoinRoutes
         return (
@@ -353,7 +402,7 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
             historial_mean_best_fitness,
             historial_mean_media_fitness,
             historial_mean_diversidad,
-            fitness_poblacion_global
+            historial_fitness_poblacion_global
         )
 
     # Funcion que orquesta el paralelismo distribuyendo las zonas geograficas
@@ -403,16 +452,17 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
                 historial_mejor_fitness_zonas.append(best_fitness_zona)
                 historial_media_fitness_zonas.append(mean_fitness_zona)
                 historial_diversidad_zonas.append(diversidad_zona)
-                fitness_poblacion_global.extend(fitness_poblacion_zona)
+                fitness_poblacion_global.append(fitness_poblacion_zona)
                 
                 # Repartimos los camiones devueltos en su lista global correspondiente
                 for it in range(self.num_ejecuciones):
                     caminos_totales[it].extend(caminos_zonas[it])
 
         # Hacemos la media vertical del fitness y diversidad
-        historial_mean_best_fitness: list = np.mean(historial_mejor_fitness_zonas, axis=0).tolist()
-        historial_mean_media_fitness: list = np.mean(historial_media_fitness_zonas, axis=0).tolist()
+        historial_mean_best_fitness: list = np.sum(historial_mejor_fitness_zonas, axis=0).tolist()
+        historial_mean_media_fitness: list = np.sum(historial_media_fitness_zonas, axis=0).tolist()
         historial_mean_diversidad: list = np.mean(historial_diversidad_zonas, axis=0).tolist()
+        historial_fitness_poblacion_global: list = np.sum(fitness_poblacion_global, axis=0).tolist()
                 
         # Devolvemos las bolsas ensambladas listas para JoinRoutes
         return (
@@ -420,5 +470,5 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
             historial_mean_best_fitness,
             historial_mean_media_fitness,
             historial_mean_diversidad,
-            fitness_poblacion_global
+            historial_fitness_poblacion_global
         )

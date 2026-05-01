@@ -85,7 +85,12 @@ class ClusteringManager:
 
             # Calculamos la demanda falsa (complementaria)
             demanda_falsa: float = abs(demands[cliente] - promedio_ideal)
-            demanda_falsa_norm: float = demanda_falsa / max_demanda_falsa
+            
+            # Evitamos la division por cero si todos los clientes tienen la misma demanda
+            if max_demanda_falsa == 0:
+                demanda_falsa_norm = 0.0
+            else:
+                demanda_falsa_norm = demanda_falsa / max_demanda_falsa
             
             # Añadimos el nuevo cliente
             datos_entrenamiento.append([x_norm, y_norm, demanda_falsa_norm])
