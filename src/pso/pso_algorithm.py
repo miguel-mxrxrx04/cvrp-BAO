@@ -56,7 +56,10 @@ class PSOAlgorithm(BaseAlgorithm):
         pso_algorithm: swarm.PSO = swarm.PSO(self.generador_random)
         
         # Establecemos la condicion de parada estricta basada en el limite de evaluaciones
-        pso_algorithm.terminator = ec.terminators.no_improvement_termination
+        pso_algorithm.terminator = [
+            ec.terminators.evaluation_termination,
+            ec.terminators.no_improvement_termination
+        ]
         
         # Asignamos los observers
         if self.verbose:
