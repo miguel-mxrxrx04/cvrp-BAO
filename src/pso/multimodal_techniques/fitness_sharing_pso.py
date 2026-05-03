@@ -14,7 +14,7 @@ class FitnessSharingPSO(BasePSO):
     def __init__(
         self,
         datos_problema: CVRPProblem=None,
-        radio: float=2.0,
+        radio: float=0.5,
         alpha: float=1.0,
         num_soluciones_corregir=None
     ):
@@ -23,8 +23,29 @@ class FitnessSharingPSO(BasePSO):
         super().__init__(datos_problema, num_soluciones_corregir)
         
         # Asignamos los parametros fisicos del nicho
-        self.radio: float = radio
+        self.radio: float = self._calcular_radio_dinamico(radio)
         self.alpha: float = alpha
+
+    # Funcion auxiliar para escalar el cráter al tamaño del problema
+    def _calcular_radio_dinamico(self, valor_radio: float) -> float:
+        
+        # Si no hay problema cargado, devolvemos el valor tal cual por seguridad
+        if self.datos_problema is None:
+            return valor_radio
+            
+        # Si el radio es mayor o igual a 1.0, asumimos que es una distancia euclídea absoluta
+        if valor_radio >= 1.0:
+            return valor_radio
+            
+        # Si el radio es menor a 1.0, se trata como un porcentaje de cobertura (Factor)
+        # Obtenemos la dimension
+        dimension_real: int = len(self.datos_problema.node_ids) - 1
+        
+        # Calculamos la diagonal maxima del hipercubo
+        distancia_maxima: float = math.sqrt(dimension_real)
+        
+        # Retornamos la fraccion correspondiente
+        return valor_radio * distancia_maxima
 
     # Funcion que devuelve los parametros de la configuracion
     def get_params_configuracion(self) -> dict:

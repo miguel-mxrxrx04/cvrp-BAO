@@ -1,5 +1,6 @@
 # Librerias a usar
 import os  # Modulo estandar para interactuar con el sistema de archivos
+import re  # Para expresiones regulares
 import time  # Modulo estandar para medir tiempos de ejecucion del codigo
 import copy  # Para sacar copias
 import shutil  # Libreria estandar para borrado de directorios con contenido
@@ -28,41 +29,104 @@ class PSOExperimentExecuter:
         ruta_script = Path(__file__).resolve()
         self.data_path: str = ruta_script.parents[3] / data_path
 
+        # Obtenemos los problemas divididos
+        problemas_divididos: tuple = self._dividir_problemas()
+
+        # Asignamos a los atributos correspondientes
+        self.problemas_pequenos: set = problemas_divididos[0]
+        self.problemas_medianos: set = problemas_divididos[1]
+        self.problemas_grandes: set = problemas_divididos[2]
+
+        # Numero de problemas disponibles
+        self.num_problemas: int = len(self.problemas_pequenos) + len(self.problemas_medianos) + len(self.problemas_grandes)
+
+    # Funcion que divide los problemas en pequeños, medianos y grandes
+    def _dividir_problemas(self) -> tuple:
+
         # Leemos todos los archivos ubicados en el directorio especificado
         archivos_carpeta: list = os.listdir(self.data_path)
 
         # Filtramos y almacenamos unicamente los nombres que terminan en la extension vrp
-        self.instancias_vrp: list = [archivo for archivo in archivos_carpeta if archivo.endswith('.vrp')]
+        instancias_vrp: list = [archivo for archivo in archivos_carpeta if archivo.endswith('.vrp')]
+
+        # Conjuntos para almacenar los problemas clasificados por complejidad (ahora como conjuntos)
+        problemas_pequenos: set = set()
+        problemas_medianos: set = set()
+        problemas_grandes: set = set()
+
+        # Instanciamos el patron para extraer el numero de clientes
+        patron = re.compile(r'n(\d+)-k')
+
+        # Clasificamos cada instancia leida en su atributo correspondiente
+        for archivo in instancias_vrp:
+
+            # Obtenemos el problema
+            match = patron.search(archivo)
+    
+            # Vemos si lo encontramos
+            if match:
+
+                # Sacamos el numero de nodos
+                nodos: int = int(match.group(1))
+
+                # Si son pocos
+                if nodos < 300:
+
+                    # Guardamos en lista de pequeños
+                    problemas_pequenos.add(archivo)
+
+                # Si son medianos
+                elif nodos < 750:
+
+                    # Guardamos en lista de medianos
+                    problemas_medianos.add(archivo)
+
+                # Si son grandes
+                else:
+
+                    # Guaradamos en lista de grandes
+                    problemas_grandes.add(archivo)
+
+        # Devolvemos los conjuntos
+        return (
+            problemas_pequenos,
+            problemas_medianos,
+            problemas_grandes
+        )
 
     # Funcion que asigna hiperparametros segun la magnitud del problema
     def _calculate_params(self, n_clientes: int) -> dict:
         
         # Declaramos un diccionario base con los parametros estaticos
-        parametros: dict = {
-            'inercia': 0.7,
-            'cognitivo': 1.5,
-            'social': 1.5,
-            'tamano_vecindario': 5
-        }
+        parametros: dict = {}
 
-        # Escalado automatico evaluando la cantidad de nodos
+        # Escalado automatico evaluando la cantidad de nodos (este por si es de un cluster)
         if n_clientes <= 50:
 
             # Asignamos el limite de evaluaciones para mapas pequeños o medianos
             parametros['max_evaluaciones'] = 3000
             parametros['tamano_poblacion'] = 20
 
-        elif n_clientes <= 200:
+        # Si es un mapa pequeño
+        elif n_clientes <= 300:
             
             # Asignamos el limite de evaluaciones para mapas pequeños o medianos
             parametros['max_evaluaciones'] = 10000
             parametros['tamano_poblacion'] = 50
+
+        # Si es un mapa pequeño
+        elif n_clientes <= 750:
             
+            # Asignamos el limite de evaluaciones para mapas pequeños o medianos
+            parametros['max_evaluaciones'] = 30000
+            parametros['tamano_poblacion'] = 100
+        
+        # SI es un mapa gigante
         else:
             
             # Asignamos un limite mayor de evaluaciones para mapas complejos
-            parametros['max_evaluaciones'] = 30000
-            parametros['tamano_poblacion'] = 100
+            parametros['max_evaluaciones'] = 45000
+            parametros['tamano_poblacion'] = 150
             
         # Devolvemos el diccionario perfectamente configurado
         return parametros
@@ -325,22 +389,39 @@ class PSOExperimentExecuter:
         overwrite: bool=False
     ) -> None:
 
+        # Conjunto para almacenar que CSVs ya existen
+        archivos_procesados: set = set()
+
         # Evaluamos si el directorio de exportacion ya existe
         if os.path.isdir(experiment_folder):
             
-            # Si el usuario permite sobreescribir, borramos la carpeta entera
+            # Vemos si quiere sobreescribir
             if overwrite:
+
+                # Borramos la carpeta entera
                 shutil.rmtree(experiment_folder)
                 
-            # Si no permite sobreescribir, lanzamos una excepcion para proteger los datos
+            # Si no permite sobreescribir, lanzamos prueba con los que no hicimos csv
             else:
-                raise ValueError(f'La carpeta {experiment_folder} ya existe. Usa overwrite=True para sobreescribirla.')
+                
+                # Sacamos los problemas resueltos
+                self._obtener_problemas_resueltos(archivos_procesados, experiment_folder)
+
+        # Juntamos todo lo que vamos a procesar
+        instancias_vrp: list = self._obtener_problemas_procesar(archivos_procesados)
 
         # Generamos la jerarquia de carpetas limpia
-        os.makedirs(experiment_folder)
+        os.makedirs(experiment_folder, exist_ok=True)
+
+        # Si no hay problemas para procesar, terminamos
+        if not instancias_vrp:
+
+            # Mensaje
+            print('No hay problemas para procesar, estan todos.')
+            return
 
         # Entramos en un barrido iterativo procesando cada documento (.vrp) localizado
-        for instancia in self.instancias_vrp:
+        for instancia in instancias_vrp:
             
             # Sondenamos el tamano del mapa real para ajustar el esfuerzo computacional
             total_clientes: int = self._obtener_num_clientes(instancia) if num_clientes_cluster == 0 else num_clientes_cluster
@@ -375,9 +456,38 @@ class PSOExperimentExecuter:
 
             # Volcamos la matriz de datos omitiendo el indice enumerativo nativo
             df_resultados.to_csv(ruta_exportacion, index=False)
-            
-            # Notificamos el exito materializando la pervivencia de los registros
-            print(f'Salida generada exitosamente en: {ruta_exportacion}')
+
+    # Funcion que saca los problemas ya procesados
+    def _obtener_problemas_resueltos(self, archivos_procesados: set, experiment_folder: str) -> None:
+
+        # Patron para capturar todo lo que hay entre 'experiment_' y '.csv'
+        patron_csv = re.compile(r'experiment_(.*)\.csv')
+
+        # Bucle para obtener los problemas ya resueltos
+        for archivo in os.listdir(experiment_folder):
+
+            # Hacemos la RE para sacar el nombre del archivo
+            match_csv = patron_csv.match(archivo)
+                    
+            # Reconstruimos el nombre base con su extension original
+            nombre_base: str = f'{match_csv.group(1)}.vrp'
+            archivos_procesados.add(nombre_base)
+
+    # Funcion para obtener los problemas a procesar
+    def _obtener_problemas_procesar(self, archivos_procesados: set) -> list:
+
+        # Sacamos los archivos ya existentes
+        problemas_pequeños: list = list(self.problemas_pequenos - archivos_procesados)
+        problemas_medianos: list = list(self.problemas_medianos - archivos_procesados)
+        problemas_grandes: list = list(self.problemas_grandes - archivos_procesados)
+
+        # Sacamos una muestra de cada uno aleatoriamente (mas muestras para los pequeños, menos para las grandes)
+        procesar_pequeños = set(random.sample(problemas_pequeños, min(14, len(problemas_pequeños))))
+        procesar_medianos = set(random.sample(problemas_medianos, min(5, len(problemas_medianos))))
+        procesar_grandes = set(random.sample(problemas_grandes, min(2, len(problemas_grandes))))
+
+        # Devolvemos los problemas a procesar
+        return list(procesar_pequeños | procesar_medianos | procesar_grandes)
 
     # Funcion auxiliar para leer rapidamente la cantidad de clientes de un archivo
     def _obtener_num_clientes(self, nombre_problema: str) -> int:

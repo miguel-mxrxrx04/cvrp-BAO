@@ -24,10 +24,34 @@ class ClearingPSO(BasePSO):
         super().__init__(datos_problema, num_soluciones_corregir)
         
         # Asignamos los parametros fisicos de la limpieza
-        self.radio: float = radio
+        self.radio: float = self._calcular_radio_dinamico(radio)
         
         # Calculamos la penalizacion como la distancia maxima existente en el mapa
-        self.penalizacion: float = np.max(datos_problema.distance_matrix) if penalizacion is None else penalizacion
+        if self.datos_problema is not None:
+            self.penalizacion: float = 2 * np.sum(self.datos_problema.distance_matrix[0, 1:]) if penalizacion is None else penalizacion
+        else:
+            self.penalizacion: float = 0.0 if penalizacion is None else penalizacion
+
+    # Funcion auxiliar para escalar el cráter al tamaño del problema
+    def _calcular_radio_dinamico(self, valor_radio: float) -> float:
+        
+        # Si no hay problema cargado, devolvemos el valor tal cual por seguridad
+        if self.datos_problema is None:
+            return valor_radio
+            
+        # Si el radio es mayor o igual a 1.0, asumimos que es una distancia euclídea absoluta
+        if valor_radio >= 1.0:
+            return valor_radio
+            
+        # Si el radio es menor a 1.0, se trata como un porcentaje de cobertura (Factor)
+        # Obtenemos la dimension
+        dimension_real: int = len(self.datos_problema.node_ids) - 1
+        
+        # Calculamos la diagonal maxima del hipercubo
+        distancia_maxima: float = math.sqrt(dimension_real)
+        
+        # Retornamos la fraccion correspondiente
+        return valor_radio * distancia_maxima
 
     # Funcion que devuelve los parametros de la configuracion
     def get_params_configuracion(self) -> dict:

@@ -292,7 +292,7 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
             # Instanciamos la tecnica Secuencial con el detector de Jaccard
             tecnica_secuencial: SequentialPSO = SequentialPSO(
                 datos_problema=problema_local,
-                umbral_similitud=parametros_config_pso['umbral_similitud'],
+                radio=parametros_config_pso['radio'],
                 penalizacion=parametros_config_pso['penalizacion'],
                 num_soluciones_corregir=parametros_config_pso['num_soluciones_corregir']
             )
@@ -309,7 +309,7 @@ class ClusteringPSOAlgorithm(PSOAlgorithm):
             ruta_mejor_particula: list = tecnica_secuencial.get_ruta_particula(mejor_particula)
             
             # Guardamos la ruta limpia real para penalizarla en la siguiente iteracion
-            historial_mejores_rutas.append(ruta_mejor_particula)
+            historial_mejores_rutas.append(mejor_particula.candidate)
 
             # Guardamos los historicos fitness y diversidad
             total_mejor_fitness.append(motor_local.historico_fitness_mejor)
