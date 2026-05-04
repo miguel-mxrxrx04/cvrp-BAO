@@ -33,9 +33,9 @@ class PSOExperimentExecuter:
         problemas_divididos: tuple = self._dividir_problemas()
 
         # Asignamos a los atributos correspondientes
-        self.problemas_pequenos: set = problemas_divididos[0]
-        self.problemas_medianos: set = problemas_divididos[1]
-        self.problemas_grandes: set = problemas_divididos[2]
+        self.problemas_pequenos: set = set(random.sample(problemas_divididos[0], min(14, len(problemas_divididos[0]))))
+        self.problemas_medianos: set = set(random.sample(problemas_divididos[1], min(5, len(problemas_divididos[1]))))
+        self.problemas_grandes: set = set(random.sample(problemas_divididos[2], min(2, len(problemas_divididos[2]))))
 
         # Numero de problemas disponibles
         self.num_problemas: int = len(self.problemas_pequenos) + len(self.problemas_medianos) + len(self.problemas_grandes)
@@ -49,10 +49,10 @@ class PSOExperimentExecuter:
         # Filtramos y almacenamos unicamente los nombres que terminan en la extension vrp
         instancias_vrp: list = [archivo for archivo in archivos_carpeta if archivo.endswith('.vrp')]
 
-        # Conjuntos para almacenar los problemas clasificados por complejidad (ahora como conjuntos)
-        problemas_pequenos: set = set()
-        problemas_medianos: set = set()
-        problemas_grandes: set = set()
+        # Listas para almacenar los problemas clasificados por complejidad
+        problemas_pequenos: list = []
+        problemas_medianos: list = []
+        problemas_grandes: list = []
 
         # Instanciamos el patron para extraer el numero de clientes
         patron = re.compile(r'n(\d+)-k')
@@ -73,21 +73,21 @@ class PSOExperimentExecuter:
                 if nodos < 300:
 
                     # Guardamos en lista de pequeños
-                    problemas_pequenos.add(archivo)
+                    problemas_pequenos.append(archivo)
 
                 # Si son medianos
                 elif nodos < 750:
 
                     # Guardamos en lista de medianos
-                    problemas_medianos.add(archivo)
+                    problemas_medianos.append(archivo)
 
                 # Si son grandes
                 else:
 
                     # Guaradamos en lista de grandes
-                    problemas_grandes.add(archivo)
+                    problemas_grandes.append(archivo)
 
-        # Devolvemos los conjuntos
+        # Devolvemos las listas
         return (
             problemas_pequenos,
             problemas_medianos,
@@ -417,7 +417,7 @@ class PSOExperimentExecuter:
         if not instancias_vrp:
 
             # Mensaje
-            print('No hay problemas para procesar, estan todos.')
+            print('No hay problemas para procesar en esta ejecucion.')
             return
 
         # Entramos en un barrido iterativo procesando cada documento (.vrp) localizado
@@ -477,17 +477,12 @@ class PSOExperimentExecuter:
     def _obtener_problemas_procesar(self, archivos_procesados: set) -> list:
 
         # Sacamos los archivos ya existentes
-        problemas_pequeños: list = list(self.problemas_pequenos - archivos_procesados)
-        problemas_medianos: list = list(self.problemas_medianos - archivos_procesados)
-        problemas_grandes: list = list(self.problemas_grandes - archivos_procesados)
-
-        # Sacamos una muestra de cada uno aleatoriamente (mas muestras para los pequeños, menos para las grandes)
-        procesar_pequeños = set(random.sample(problemas_pequeños, min(14, len(problemas_pequeños))))
-        procesar_medianos = set(random.sample(problemas_medianos, min(5, len(problemas_medianos))))
-        procesar_grandes = set(random.sample(problemas_grandes, min(2, len(problemas_grandes))))
+        problemas_pequenos: set = set(self.problemas_pequenos - archivos_procesados)
+        problemas_medianos: set = set(self.problemas_medianos - archivos_procesados)
+        problemas_grandes: set = set(self.problemas_grandes - archivos_procesados)
 
         # Devolvemos los problemas a procesar
-        return list(procesar_pequeños | procesar_medianos | procesar_grandes)
+        return list(problemas_pequenos | problemas_medianos | problemas_grandes)
 
     # Funcion auxiliar para leer rapidamente la cantidad de clientes de un archivo
     def _obtener_num_clientes(self, nombre_problema: str) -> int:

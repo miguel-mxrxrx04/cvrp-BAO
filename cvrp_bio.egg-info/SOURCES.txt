@@ -5,3 +5,7 @@ cvrp_bio.egg-info/SOURCES.txt
 cvrp_bio.egg-info/dependency_links.txt
 cvrp_bio.egg-info/top_level.txt
 src/__init__.py
+stac/__init__.py
+stac/nonparametric_tests.py
+stac/parametric_tests.py
+stac/unit_tests.py
