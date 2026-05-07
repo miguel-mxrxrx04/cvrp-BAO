@@ -1,0 +1,6 @@
+inspyred==1.0.3
+matplotlib==3.10.9
+numpy==2.4.4
+pandas==3.0.2
+scikit_learn==1.8.0
+setuptools==82.0.1
