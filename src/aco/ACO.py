@@ -1,5 +1,7 @@
 import math
 import random
+import numpy as np
+import matplotlib.pyplot as plt
 from copy import deepcopy
 
 
@@ -17,6 +19,9 @@ class ACOSolver:
         evaporation=0.25,
         q=100.0,
         seed=42,
+        constraint_handling='feasibility',  # If you want to use feasibility or penalty
+        multimodal_technique='archive',  # Sequential nitches or
+        penalty_factor=None  # Penalty
     ):
         self.nodes = nodes
         self.demands = demands
@@ -30,6 +35,10 @@ class ACOSolver:
         self.evaporation = evaporation
         self.q = q
 
+        # Multimodal techniques
+        self.constraint_handling = constraint_handling
+        self.multimodal_technique = multimodal_technique
+
         random.seed(seed)
 
         self.customers = [i for i in nodes if i != depot_id]
@@ -37,11 +46,18 @@ class ACOSolver:
         self.pheromone = {
             (i, j): 1.0 for i in nodes for j in nodes if i != j
         }
+
+        if penalty_factor is not None:
+            self.penalty_factor = penalty_factor
+        else:
+            total_distance = sum(self.dist[(self.depot_id, c)] for c in self.customers)
+            self.penalty_factor = 2.0 * total_distance
+
         self.history = {
-        "iteration": [],
-        "best": [],
-        "iteration_best": [],
-        "average": [],
+            "iteration": [],
+            "best": [],
+            "iteration_best": [],
+            "average": [],
         }
 
     def _build_distance_matrix(self):
@@ -63,7 +79,15 @@ class ACOSolver:
         return total
 
     def solution_distance(self, solution):
-        return sum(self.route_distance(route) for route in solution)
+        total_dist = sum(self.route_distance(route) for route in solution)
+
+        if self.constraint_handling == "penalty":
+            for route in solution:
+                load = sum(self.demands[c] for c in route)
+                if load > self.capacity:
+                    total_dist += (load - self.capacity) * self.penalty_factor
+                    
+        return total_dist
 
     def _choose_next_customer(self, current, feasible):
         scores = []
@@ -98,10 +122,15 @@ class ACOSolver:
             current = self.depot_id
 
             while True:
-                feasible = [
-                    c for c in unvisited
-                    if load + self.demands[c] <= self.capacity
-                ]
+                if self.constraint_handling == "feasibility":
+                    feasible = [
+                        c for c in unvisited
+                        if load + self.demands[c] <= self.capacity
+                    ]
+                else:
+                    if load >= self.capacity: 
+                        break
+                    feasible = list(unvisited)
 
                 if not feasible:
                     break
@@ -182,7 +211,7 @@ class ACOSolver:
         for route in solution:
             load = sum(self.demands[c] for c in route)
 
-            if load > self.capacity:
+            if self.constraint_handling == "feasibility" and load > self.capacity:
                 return False
 
             seen.extend(route)
@@ -224,9 +253,25 @@ class ACOSolver:
                 self.history["iteration_best"].append(iteration_best)
                 self.history["average"].append(iteration_avg)
 
-            for solution, cost in iteration_solutions:
-                if cost <= quality_threshold * best_cost:
-                    archive.append((deepcopy(solution), cost))
+            if self.multimodal_technique == "archive":
+                for solution, cost in iteration_solutions:
+                    if cost <= quality_threshold * best_cost:
+                        archive.append((deepcopy(solution), cost))
+
+            elif self.multimodal_technique == "sequential":
+                interval = max(1, self.n_iterations // n_alternatives)
+                if (iteration + 1) % interval == 0 and best_solution is not None:
+                    archive.append((deepcopy(best_solution), best_cost))
+                    for route in best_solution:
+                        full_route = [self.depot_id] + route + [self.depot_id]
+                        for a, b in zip(full_route, full_route[1:]):
+                            self.pheromone[(a, b)] *= 0.0001
+                            self.pheromone[(b, a)] *= 0.0001
+
+                    best_cost = float("inf")
+
+        if self.multimodal_technique == "sequential":
+            return archive[0][0] if archive else best_solution, archive[0][1] if archive else best_cost, archive
 
         archive.sort(key=lambda x: x[1])
 
@@ -323,4 +368,27 @@ class ACOSolver:
         plt.title("Comparison of Diverse ACO Alternatives")
         plt.legend()
         plt.grid(True, axis="y", linestyle="--", alpha=0.5)
+        plt.show()
+
+    def plot_pheromone_heatmap(self):
+
+        node_ids = list(self.nodes.keys())
+        n = len(node_ids)
+        matrix = np.zeros((n, n))
+
+        for i, origin in enumerate(node_ids):
+            for j, dest in enumerate(node_ids):
+                if origin != dest:
+                    matrix[i, j] = self.pheromone[(origin, dest)]
+
+        plt.figure(figsize=(10, 8))
+        
+        im = plt.imshow(matrix, cmap='magma', aspect='auto', interpolation='nearest') 
+        plt.colorbar(im, label='Concentración de Feromonas ($\\tau$)')
+        
+        plt.title('Mapa de Calor de Feromonas (Transiciones Nodo a Nodo)', fontsize=14, fontweight='bold')
+        plt.xlabel('ID del Nodo Destino', fontsize=12)
+        plt.ylabel('ID del Nodo Origen', fontsize=12)
+        
+        plt.tight_layout()
         plt.show()
