@@ -5,6 +5,17 @@ cvrp_bio.egg-info/SOURCES.txt
 cvrp_bio.egg-info/dependency_links.txt
 cvrp_bio.egg-info/top_level.txt
 src/__init__.py
+<<<<<<< HEAD
+=======
+src/GA/MultimodalGeneticAlgorithm.py
+src/GA/__init__.py
+src/aco/ACO.py
+src/aco/__init__.py
+src/common/__init__.py
+src/common/diversity.py
+src/common/parser.py
+src/common/problem.py
+>>>>>>> origin/feat/ACO_implementation
 stac/__init__.py
 stac/nonparametric_tests.py
 stac/parametric_tests.py
