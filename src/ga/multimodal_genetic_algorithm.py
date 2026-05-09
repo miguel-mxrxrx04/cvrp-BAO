@@ -1,8 +1,10 @@
 import random 
 from src.common.problem import CVRPProblem
+import inspyred
+from common.diversity import DiversityHandler
 
 class MultimodalGeneticAlgorithm:
-    def __init__(self, problem: CVRPProblem, pop_size: int = 100):
+    def __init__(self, problem: CVRPProblem, pop_size: int = 100) -> None:
         """
         Initializes the GA for multimodal CVRP
         """
@@ -13,24 +15,137 @@ class MultimodalGeneticAlgorithm:
             node_id for node_id in self.problem.node_ids
             if node_id != self.problem.depot_id
         ]
-
-    def generate_initial_population(self) -> list:
-        """
-        Generates the initial population.
-        Each individual is a random permutation of cliente IDs.
-        """
-        population = []
-        for _ in range(self.pop_size):
-            individual = self.clients.copy()
-            random.shuffle(individual)
-            population.append(individual)
-        print(f"Initial population of {self.pop_size} individuals generated.")
-        return population
+        # We'll store the history here via the observer
+        self.cost_history = []
     
+    def diversity_replacer(self, random: random.Random, population: list, offspring: list, args: dict) -> list:
+        threshold = args.setdefault('similarity_threshold', 0.15)
+        combined = population + offspring
+        combined.sort(key=lambda x: x.fitness) 
+        
+        unique_population = []
+        for individual in combined:
+            if len(unique_population) >= self.pop_size:
+                break
+                
+            is_diverse = True
+            route_ind = self.decode_chromosome(individual.candidate)
+            
+            for accepted in unique_population:
+                route_acc = self.decode_chromosome(accepted.candidate)
+                
+                # CAMBIO AQUÍ: Usamos tu clase común
+                dist = DiversityHandler.calculate_jaccard_distance(route_ind, route_acc)
+                
+                if dist < threshold: 
+                    is_diverse = False
+                    break
+            
+            if is_diverse:
+                unique_population.append(individual)
+        
+        if len(unique_population) < self.pop_size:
+            for ind in combined:
+                if ind not in unique_population:
+                    unique_population.append(ind)
+                    if len(unique_population) >= self.pop_size:
+                        break
+                        
+        return unique_population
+
+    # --- INSPYRED COMPONENTS ---
+    def generate_chromosome(self, random: random.Random, args: dict) -> list:
+        """
+        Inspyred Generator: Creates a single initial individual.     
+        """
+        individual = self.clients.copy()
+        random.shuffle(individual)
+        return individual
+
+    def evaluate_population(self, candidates: list, args: dict) -> list:
+        """
+        Calculates fitness for the entire population.
+        """
+        fitness_values = []
+        for candidate in candidates:
+            decoded_route = self.decode_chromosome(candidate)
+            fitness = self.problem.evaluate_route_distance(decoded_route)
+            fitness_values.append(fitness)
+        return fitness_values
+    
+    def custom_variator(self, random: random.Random, candidates: list, args: dict) -> list:
+        """
+        Inspyred Variator: Applies OX1 crossover and Swap mutation.
+        """
+        mutation_rate = args.setdefault('mutation_rate', 0.05)
+        offspring = []
+
+        for i in range(0, len(candidates), 2):
+            parent1 = candidates[i]
+            parent2 = candidates[i+1] if i + 1 < len(candidates) else candidates[0]
+
+            child1 = self.order_crossover(parent1, parent2)
+            child2 = self.order_crossover(parent2, parent1)
+
+            child1 = self.swap_mutation(child1, mutation_rate)
+            child2 = self.swap_mutation(child2, mutation_rate)
+
+            offspring.extend([child1, child2])
+
+        return offspring[:len(candidates)]
+    
+    def diversity_replacer(self, random: random.Random, population: list, offspring: list, args: dict) -> list:
+        """
+        Custom Inspyred Replacer (Crowding): 
+        Ensures the population maintains structural diversity during evolution.
+        """
+        threshold = args.setdefault('similarity_threshold', 0.15)
+        combined = population + offspring
+        # Sort by fitness (lowest is best)
+        combined.sort(key=lambda x: x.fitness) 
+        
+        unique_population = []
+        for individual in combined:
+            if len(unique_population) >= self.pop_size:
+                break
+                
+            is_diverse = True
+            route_ind = self.decode_chromosome(individual.candidate)
+            
+            for accepted in unique_population:
+                route_acc = self.decode_chromosome(accepted.candidate)
+                dist = self.calculate_jaccard_distance(route_ind, route_acc)
+                if dist < threshold: # Too similar to an existing one
+                    is_diverse = False
+                    break
+            
+            if is_diverse:
+                unique_population.append(individual)
+        
+        # If we filtered out too many, fill the rest with the remaining best individuals
+        if len(unique_population) < self.pop_size:
+            for ind in combined:
+                if ind not in unique_population:
+                    unique_population.append(ind)
+                    if len(unique_population) >= self.pop_size:
+                        break
+                        
+        return unique_population
+       
+    def observer_tracker(self, population: list, num_generations: int, num_evaluations: int, args: dict) -> None:
+        """
+        Inspyred Observer: Runs at the end of each generation to track progress.
+        """
+        best_fitness = min([ind.fitness for ind in population])
+        self.cost_history.append(best_fitness)
+        
+        if num_generations % 10 == 0:
+            print(f"Generation {num_generations:3d} | Best cost: {best_fitness:.2f}")
+
+    # --- DOMAIN LOGIC ---
     def decode_chromosome(self, chromosome: list) -> list:
         """
-        Converts a giant client permuatition into a valid CVRP route.
-        Inserts the depot at the start, end, and whenever capacity is exceeded.
+        Converts a client permutation into a valid CVRP route with depots.
         """
         route = [self.problem.depot_id]
         current_load = 0
@@ -49,35 +164,11 @@ class MultimodalGeneticAlgorithm:
         return route
     
     def evaluate_fitness(self, decoded_route: list) -> float:
-        """
-        Calculates the total distance of a valid, decoded route.
-        Lower fitness is better (minimization problem)
-        """
+        """Calculates total distance."""
         return self.problem.evaluate_route_distance(decoded_route)
     
-    def tournament_selection(self, population: list, k: int = 3) -> list:
-        """
-        Selects the best individual from a random sample of size k.
-        """
-        best_individual = None
-        best_fitness = float('inf')
-
-        tournament = random.sample(population, k)
-
-        for individual in tournament:
-            decoded = self.decode_chromosome(individual)
-            fitness = self.evaluate_fitness(decoded)
-
-            if fitness < best_fitness:
-                best_fitness = fitness
-                best_individual = individual
-        return best_individual
-    
     def order_crossover(self, parent1: list, parent2: list) -> list:
-        """
-        Performs OX1 crossover, suitable for permutation chromosomes.
-        Ensures no duplicate or missing clients in the child.
-        """
+        """Performs OX1 crossover."""
         size = len(parent1)
         child = [-1] * size
 
@@ -96,64 +187,73 @@ class MultimodalGeneticAlgorithm:
         return child
 
     def swap_mutation(self, chromosome: list, mutation_rate: float = 0.05) -> list:
-            """
-            Randomly swaps two genes in the chromosome based on the mutation rate.
-            Maintains permutation integrity (no duplicate or missing clients).
-            """
-            # Generamos un número aleatorio entre 0 y 1. Si es menor que el mutation_rate, mutamos.
-            if random.random() < mutation_rate:
-                # Seleccionamos dos índices distintos al azar
-                idx1, idx2 = random.sample(range(len(chromosome)), 2)
-                
-                # Intercambiamos los valores en esas posiciones
-                chromosome[idx1], chromosome[idx2] = chromosome[idx2], chromosome[idx1]
-                
-            return chromosome
+        """Performs swap mutation."""
+        if random.random() < mutation_rate:
+            idx1, idx2 = random.sample(range(len(chromosome)), 2)
+            chromosome[idx1], chromosome[idx2] = chromosome[idx2], chromosome[idx1]
+        return chromosome
 
-    def run(self, generations: int = 100, mutation_rate: float = 0.05) -> tuple:
+def run(self, generations: int = 100, mutation_rate: float = 0.05, similarity_threshold: float = 0.15) -> tuple:
         """
-        Executes the main evolutionary loop.
-        Returns the best route found, its cost, and the cost history per generation.
+        Orchestrates the engine and extracts the Top 3 distinct routes.
+        Returns a list of tuples: [(route1, cost1), (route2, cost2), (route3, cost3)] and history.
         """
-        population = self.generate_initial_population()
+        print(f"Starting Multimodal GA for {generations} generations.")
+        
+        prng = random.Random()
+        ga_engine = inspyred.ec.EvolutionaryComputation(prng)
 
-        best_overall_route = None
-        best_overall_cost = float('inf')
-        cost_history = []
+        ga_engine.selector = inspyred.ec.selectors.tournament_selection
+        # Hook up our custom diversity replacer
+        ga_engine.replacer = self.diversity_replacer 
+        ga_engine.variator = self.custom_variator
+        ga_engine.terminator = inspyred.ec.terminators.generation_termination
+        ga_engine.observer = self.observer_tracker
 
-        print(f"Starting GA for {generations} generations")
+        self.cost_history = []
 
-        for gen in range(generations):
-            new_population = []
-            while len(new_population) < self.pop_size:
-                parent1 = self.tournament_selection(population)
-                parent2 = self.tournament_selection(population)
-                child = self.order_crossover(parent1, parent2)
-                child = self.swap_mutation(child, mutation_rate)
+        # Execute the evolution
+        final_population = ga_engine.evolve(
+            generator=self.generate_chromosome,
+            evaluator=self.evaluate_population,
+            pop_size=self.pop_size,
+            bounder=inspyred.ec.DiscreteBounder(self.clients),
+            maximize=False, 
+            max_generations=generations,
+            tournament_size=3,
+            mutation_rate=mutation_rate,
+            similarity_threshold=similarity_threshold # Passed to our replacer
+        )
 
-                new_population.append(child)
-            population = new_population
-            current_best_cost = float('inf')
-            current_best_individual = None
-
-            for ind in population:
-                decoded = self.decode_chromosome(ind)
-                cost = self.evaluate_fitness(decoded)
-
-                if cost < current_best_cost:
-                    current_best_cost = cost
-                    current_best_ind = ind
+        # Sort the final population by best fitness (lowest distance)
+        final_population.sort(key=lambda x: x.fitness)
+        
+        # Extract the Top 3 structurally distinct solutions
+        top_3_solutions = []
+        for ind in final_population:
+            if len(top_3_solutions) >= 3:
+                break
+                
+            route = self.decode_chromosome(ind.candidate)
+            cost = ind.fitness
             
-            cost_history.append(current_best_cost)
+            is_novel = True
+            for accepted_route, _ in top_3_solutions:
+                if DiversityHandler.calculate_jaccard_distance(route, accepted_route) < similarity_threshold:
+                    is_novel = False
+                    break
+                    
+            if is_novel:
+                top_3_solutions.append((route, cost))
 
-            if current_best_cost < best_overall_cost:
-                best_overall_cost = current_best_cost
-                best_overall_route = self.decode_chromosome(current_best_ind)
-            
-            if gen % 10 == 0 or gen == generations - 1:
-                print(f"Generation {gen:3d} | Best cost: {best_overall_cost:.2f}")
+        # Fallback: If we couldn't find 3 completely diverse ones, just add the next best unique ones
+        if len(top_3_solutions) < 3:
+            for ind in final_population:
+                if len(top_3_solutions) >= 3:
+                    break
+                route = self.decode_chromosome(ind.candidate)
+                if not any(route == acc_route for acc_route, _ in top_3_solutions):
+                    top_3_solutions.append((route, ind.fitness))
+
         print("Evolution completed.")
-        return best_overall_route, best_overall_cost, cost_history
-
-
-
+        return top_3_solutions, self.cost_history
