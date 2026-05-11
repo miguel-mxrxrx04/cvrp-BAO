@@ -1,7 +1,6 @@
 import random 
 from src.common.problem import CVRPProblem
 import inspyred
-from common.diversity import DiversityHandler
 
 class MultimodalGeneticAlgorithm:
     def __init__(self, problem: CVRPProblem, pop_size: int = 100) -> None:
@@ -18,40 +17,25 @@ class MultimodalGeneticAlgorithm:
         # We'll store the history here via the observer
         self.cost_history = []
     
-    def diversity_replacer(self, random: random.Random, population: list, offspring: list, args: dict) -> list:
-        threshold = args.setdefault('similarity_threshold', 0.15)
-        combined = population + offspring
-        combined.sort(key=lambda x: x.fitness) 
-        
-        unique_population = []
-        for individual in combined:
-            if len(unique_population) >= self.pop_size:
-                break
-                
-            is_diverse = True
-            route_ind = self.decode_chromosome(individual.candidate)
-            
-            for accepted in unique_population:
-                route_acc = self.decode_chromosome(accepted.candidate)
-                
-                # CAMBIO AQUÍ: Usamos tu clase común
-                dist = DiversityHandler.calculate_jaccard_distance(route_ind, route_acc)
-                
-                if dist < threshold: 
-                    is_diverse = False
-                    break
-            
-            if is_diverse:
-                unique_population.append(individual)
-        
-        if len(unique_population) < self.pop_size:
-            for ind in combined:
-                if ind not in unique_population:
-                    unique_population.append(ind)
-                    if len(unique_population) >= self.pop_size:
-                        break
-                        
-        return unique_population
+    # --- INTERNAL DIVERSITY METRICS (No external imports needed) ---
+    def get_edges(self, route: list) -> set:
+        """Converts a route into a set of undirected edges for comparison."""
+        edges = set()
+        for i in range(len(route) - 1):
+            u, v = route[i], route[i+1]
+            edges.add((min(u, v), max(u, v)))
+        return edges
+
+    def calculate_jaccard_distance(self, route1: list, route2: list) -> float:
+        """
+        Calculates the Jaccard distance between two routes based on their edges.
+        Returns 0.0 if identical, 1.0 if completely different.
+        """
+        edges1 = self.get_edges(route1)
+        edges2 = self.get_edges(route2)
+        intersection = len(edges1.intersection(edges2))
+        union = len(edges1.union(edges2))
+        return 1.0 - (intersection / union) if union > 0 else 0.0
 
     # --- INSPYRED COMPONENTS ---
     def generate_chromosome(self, random: random.Random, args: dict) -> list:
@@ -193,9 +177,10 @@ class MultimodalGeneticAlgorithm:
             chromosome[idx1], chromosome[idx2] = chromosome[idx2], chromosome[idx1]
         return chromosome
 
-def run(self, generations: int = 100, mutation_rate: float = 0.05, similarity_threshold: float = 0.15) -> tuple:
+    # --- MAIN EXECUTION ---
+    def run(self, generations: int = 100, mutation_rate: float = 0.05, similarity_threshold: float = 0.15) -> tuple:
         """
-        Orchestrates the engine and extracts the Top 3 distinct routes.
+        Orchestrates the Inspyred engine and extracts the Top 3 distinct routes.
         Returns a list of tuples: [(route1, cost1), (route2, cost2), (route3, cost3)] and history.
         """
         print(f"Starting Multimodal GA for {generations} generations.")
@@ -204,7 +189,7 @@ def run(self, generations: int = 100, mutation_rate: float = 0.05, similarity_th
         ga_engine = inspyred.ec.EvolutionaryComputation(prng)
 
         ga_engine.selector = inspyred.ec.selectors.tournament_selection
-        # Hook up our custom diversity replacer
+        # We hook up our custom diversity replacer here!
         ga_engine.replacer = self.diversity_replacer 
         ga_engine.variator = self.custom_variator
         ga_engine.terminator = inspyred.ec.terminators.generation_termination
@@ -212,7 +197,6 @@ def run(self, generations: int = 100, mutation_rate: float = 0.05, similarity_th
 
         self.cost_history = []
 
-        # Execute the evolution
         final_population = ga_engine.evolve(
             generator=self.generate_chromosome,
             evaluator=self.evaluate_population,
@@ -225,10 +209,10 @@ def run(self, generations: int = 100, mutation_rate: float = 0.05, similarity_th
             similarity_threshold=similarity_threshold # Passed to our replacer
         )
 
-        # Sort the final population by best fitness (lowest distance)
+        # 1. Sort the final population by best fitness
         final_population.sort(key=lambda x: x.fitness)
         
-        # Extract the Top 3 structurally distinct solutions
+        # 2. Extract the Top 3 structurally distinct solutions
         top_3_solutions = []
         for ind in final_population:
             if len(top_3_solutions) >= 3:
@@ -239,7 +223,7 @@ def run(self, generations: int = 100, mutation_rate: float = 0.05, similarity_th
             
             is_novel = True
             for accepted_route, _ in top_3_solutions:
-                if DiversityHandler.calculate_jaccard_distance(route, accepted_route) < similarity_threshold:
+                if self.calculate_jaccard_distance(route, accepted_route) < similarity_threshold:
                     is_novel = False
                     break
                     
