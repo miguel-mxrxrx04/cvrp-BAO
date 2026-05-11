@@ -19,15 +19,7 @@ class MultimodalGeneticAlgorithm:
         self.cost_history = []
 
     # --- INSPYRED COMPONENTS ---
-    def generate_chromosome(self, random: random.Random, args: dict) -> list:
-        """
-        Inspyred Generator: Creates a single initial individual.     
-        """
-        individual = self.clients.copy()
-        random.shuffle(individual)
-        return individual
-
-    def evaluate_population(self, candidates: list, args: dict) -> list:
+def evaluate_population(self, candidates: list, args: dict) -> list:
         """
         Calculates fitness for the entire population.
         """
@@ -37,14 +29,29 @@ class MultimodalGeneticAlgorithm:
             fitness = self.problem.evaluate_route_distance(decoded_route)
             fitness_values.append(fitness)
         return fitness_values
+
+    def inversion_mutation(self, prng: random.Random, candidate: list, mutation_rate: float) -> list:
+        """
+        Reverses a random sub-segment of the route. 
+        Highly effective for breaking out of local optima in routing problems.
+        """
+        mutated = candidate[:]
+        if prng.random() < mutation_rate:
+            if len(mutated) >= 2:
+                # Seleccionamos dos puntos de corte aleatorios
+                idx1, idx2 = sorted(prng.sample(range(len(mutated)), 2))
+                # Invertimos el segmento
+                mutated[idx1:idx2] = reversed(mutated[idx1:idx2])
+        return mutated
     
     def custom_variator(self, random: random.Random, candidates: list, args: dict) -> list:
         """
-        Inspyred Variator: Applies OX1 crossover, Swap mutation, and optional 2-opt Local Search.
+        Inspyred Variator: Applies OX1 crossover, INVERSION mutation, and optional 2-opt Local Search.
         """
-        mutation_rate = args.setdefault('mutation_rate', 0.05)
+        mutation_rate = args.setdefault('mutation_rate', 0.20)
         use_local_search = args.setdefault('use_local_search', False)
-        ls_probability = args.setdefault('ls_probability', 0.2) # Apply 2-opt to 20% of offspring
+        # Aseguramos que la variable coincida con el método run()
+        ls_prob = args.setdefault('local_search_prob', 0.15) 
 
         offspring = []
         for i in range(0, len(candidates), 2):
@@ -54,21 +61,22 @@ class MultimodalGeneticAlgorithm:
             child1 = self.order_crossover(parent1, parent2)
             child2 = self.order_crossover(parent2, parent1)
 
-            child1 = self.swap_mutation(child1, mutation_rate)
-            child2 = self.swap_mutation(child2, mutation_rate)
+            # inversion instead of swap
+            child1 = self.inversion_mutation(random, child1, mutation_rate)
+            child2 = self.inversion_mutation(random, child2, mutation_rate)
 
-            # --- INTEGRAMOS EL ALGORITMO MEMÉTICO AQUÍ ---
+            # probability control for the memetic
             if use_local_search:
-                if random.random() < ls_probability:
+                if random.random() < ls_prob:
                     child1 = self.apply_windowed_2opt(child1)
-                if random.random() < ls_probability:
+                if random.random() < ls_prob:
                     child2 = self.apply_windowed_2opt(child2)
 
             offspring.extend([child1, child2])
 
         return offspring[:len(candidates)]
     
-    def diversity_replacer(self, random: random.Random, population: list, offspring: list, args: dict) -> list:
+    def diversity_replacer(self, random, population, offspring, args, **kwargs):
         """
         Custom Inspyred Replacer (Crowding): 
         Ensures the population maintains structural diversity during evolution.
@@ -201,12 +209,12 @@ class MultimodalGeneticAlgorithm:
             
         return best_chromosome
 
-    def run(self, generations: int = 100, mutation_rate: float = 0.05, 
-            similarity_threshold: float = 0.15, use_local_search: bool = False) -> tuple:
+    def run(self, generations: int = 100, mutation_rate: float = 0.20,  
+            similarity_threshold: float = 0.15, use_local_search: bool = False,
+            tournament_size: int = 2, local_search_prob: float = 0.15) -> tuple:
         """
         Orchestrates the Inspyred engine and extracts the Top 3 distinct routes.
         'use_local_search' acts as a toggle between Pure GA and Memetic GA.
-        Returns a list of tuples: [(route1, cost1), (route2, cost2), (route3, cost3)] and history.
         """
         algo_type = "Memetic" if use_local_search else "Pure"
         print(f"Starting {algo_type} Multimodal GA for {generations} generations.")
@@ -215,7 +223,6 @@ class MultimodalGeneticAlgorithm:
         ga_engine = inspyred.ec.EvolutionaryComputation(prng)
 
         ga_engine.selector = inspyred.ec.selectors.tournament_selection
-        # Hook up our custom diversity replacer
         ga_engine.replacer = self.diversity_replacer 
         ga_engine.variator = self.custom_variator
         ga_engine.terminator = inspyred.ec.terminators.generation_termination
@@ -231,16 +238,15 @@ class MultimodalGeneticAlgorithm:
             bounder=inspyred.ec.DiscreteBounder(self.clients),
             maximize=False, 
             max_generations=generations,
-            tournament_size=3,
+            tournament_size=tournament_size,          # CORREGIDO: Dinámico, no hardcodeado a 3
             mutation_rate=mutation_rate,
-            similarity_threshold=similarity_threshold, # Passed to our replacer
-            use_local_search=use_local_search # Passed to our custom_variator (Memetic trigger)
+            similarity_threshold=similarity_threshold,
+            use_local_search=use_local_search,
+            local_search_prob=local_search_prob       # NUEVO: Frena la homogeneización del 2-opt
         )
 
-        # Sort the final population by best fitness (lowest distance)
         final_population.sort(key=lambda x: x.fitness)
         
-        # Extract the Top 3 structurally distinct solutions
         top_3_solutions = []
         for ind in final_population:
             if len(top_3_solutions) >= 3:
@@ -258,7 +264,6 @@ class MultimodalGeneticAlgorithm:
             if is_novel:
                 top_3_solutions.append((route, cost))
 
-        # Fallback: If we couldn't find 3 completely diverse ones, just add the next best unique ones
         if len(top_3_solutions) < 3:
             for ind in final_population:
                 if len(top_3_solutions) >= 3:
