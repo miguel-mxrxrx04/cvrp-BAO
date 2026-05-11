@@ -19,7 +19,7 @@ class MultimodalGeneticAlgorithm:
         self.cost_history = []
 
     # --- INSPYRED COMPONENTS ---
-def evaluate_population(self, candidates: list, args: dict) -> list:
+    def evaluate_population(self, candidates: list, args: dict) -> list:
         """
         Calculates fitness for the entire population.
         """
