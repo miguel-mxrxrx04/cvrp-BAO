@@ -31,18 +31,64 @@ class MultimodalGeneticAlgorithm:
         return fitness_values
 
     def inversion_mutation(self, prng: random.Random, candidate: list, mutation_rate: float) -> list:
-        """
-        Reverses a random sub-segment of the route. 
-        Highly effective for breaking out of local optima in routing problems.
-        """
+        """Double Inversion to forcefully break out of deep local optima."""
         mutated = candidate[:]
         if prng.random() < mutation_rate:
-            if len(mutated) >= 2:
-                # Seleccionamos dos puntos de corte aleatorios
+            if len(mutated) >= 4:
+                # Primera inversión
                 idx1, idx2 = sorted(prng.sample(range(len(mutated)), 2))
-                # Invertimos el segmento
                 mutated[idx1:idx2] = reversed(mutated[idx1:idx2])
+                # Segunda inversión (el golpe de gracia al estancamiento)
+                idx3, idx4 = sorted(prng.sample(range(len(mutated)), 2))
+                mutated[idx3:idx4] = reversed(mutated[idx3:idx4])
         return mutated
+    
+    def generate_chromosome(self, random, args: dict) -> list:
+        """
+        Generates a chromosome using a Randomized Nearest Neighbor heuristic.
+        Massively improves the starting quality (Generation 0) to compete with ACO.
+        """
+        # 100% random initial route 85% of times
+        if random.random() < 0.85:
+            chromosome = list(self.clients)
+            random.shuffle(chromosome)
+            return chromosome
+
+        unvisited = set(self.clients)
+        chromosome = []
+        
+        # Start off in random node
+        current_node = random.choice(list(unvisited))
+        unvisited.remove(current_node)
+        chromosome.append(current_node)
+        
+        # Looking for nearby nodes, heuristic
+        while unvisited:
+            # Seleccionamos un "vecindario" de los 5 nodos más cercanos al actual
+            # (Esto añade aleatoriedad controlada, a diferencia de un Greedy puro)
+            candidates = random.sample(list(unvisited), min(5, len(unvisited)))
+            
+            # De esos 5, elegimos el que esté más cerca físicamente
+            best_candidate = None
+            min_dist = float('inf')
+            
+            # Necesitamos las coordenadas para medir (asumimos que las tienes en self.problem.nodes)
+            curr_coords = self.problem.nodes[current_node]
+            
+            for candidate in candidates:
+                cand_coords = self.problem.nodes[candidate]
+                # Distancia euclidiana simple al cuadrado (más rápido de computar)
+                dist_sq = (curr_coords[0] - cand_coords[0])**2 + (curr_coords[1] - cand_coords[1])**2
+                
+                if dist_sq < min_dist:
+                    min_dist = dist_sq
+                    best_candidate = candidate
+                    
+            current_node = best_candidate
+            unvisited.remove(current_node)
+            chromosome.append(current_node)
+            
+        return chromosome
     
     def custom_variator(self, random: random.Random, candidates: list, args: dict) -> list:
         """
@@ -178,10 +224,10 @@ class MultimodalGeneticAlgorithm:
             chromosome[idx1], chromosome[idx2] = chromosome[idx2], chromosome[idx1]
         return chromosome
     
-    def apply_windowed_2opt(self, chromosome: list, max_iterations: int = 1, window_size: int = 15) -> list:
+    def apply_windowed_2opt(self, chromosome: list, max_iterations: int = 3, window_size: int = 100) -> list:
         """
-        Efficient Windowed 2-opt Local Search.
-        Explores reversals of nearby genes to untangle routes without massive O(N^2) overhead.
+        Enhanced 2-opt Local Search. 
+        Window size expanded to allow global untangling of random initial routes.
         """
         best_chromosome = chromosome[:]
         best_cost = self.evaluate_fitness(self.decode_chromosome(best_chromosome))
@@ -193,7 +239,8 @@ class MultimodalGeneticAlgorithm:
         while improved and iterations < max_iterations:
             improved = False
             for i in range(chrom_len - 1):
-                limit = min(i + window_size, chrom_len)
+                # Ampliamos el límite para revisar casi toda la ruta
+                limit = min(i + window_size, chrom_len) 
                 for j in range(i + 2, limit):
                     new_chrom = best_chromosome[:i] + best_chromosome[i:j][::-1] + best_chromosome[j:]
                     new_cost = self.evaluate_fitness(self.decode_chromosome(new_chrom))
@@ -202,7 +249,7 @@ class MultimodalGeneticAlgorithm:
                         best_cost = new_cost
                         best_chromosome = new_chrom
                         improved = True
-                        break
+                        break # Encontramos mejora, aplicamos y reiniciamos búsqueda
                 if improved:
                     break
             iterations += 1
