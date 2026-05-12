@@ -240,14 +240,9 @@ class MultimodalGeneticAlgorithm:
         return unique_population
        
     def observer_tracker(self, population: List[inspyred.ec.Individual], num_generations: int, num_evaluations: int, args: Dict[str, Any]) -> None:
-        """
-        Inspyred Observer: Executes at the end of each generation to track optimization progress.
-        """
+        """Inspyred Observer: Executes at the end of each generation."""
         best_fitness: float = min([ind.fitness for ind in population])
         self.cost_history.append(best_fitness)
-        
-        if num_generations % 10 == 0:
-            print(f"Generation {num_generations:3d} | Best cost: {best_fitness:.2f}")
 
     # --- DOMAIN LOGIC ---
 
