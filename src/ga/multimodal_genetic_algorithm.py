@@ -1,117 +1,180 @@
+import math
 import random 
+from typing import List, Dict, Tuple, Set, Any
 import inspyred
+
 from src.common.problem import CVRPProblem
 from src.common.diversity import DiversityHandler
 
 class MultimodalGeneticAlgorithm:
     def __init__(self, problem: CVRPProblem, pop_size: int = 100) -> None:
         """
-        Initializes the GA for multimodal CVRP
+        Initializes the Genetic Algorithm for multimodal CVRP.
+        
+        Args:
+            problem (CVRPProblem): The specific CVRP instance to solve.
+            pop_size (int): Number of individuals in the population.
         """
-        self.problem = problem
-        self.pop_size = pop_size
+        self.problem: CVRPProblem = problem
+        self.pop_size: int = pop_size
 
-        self.clients = [
+        # Extract client IDs (excluding the depot)
+        self.clients: List[int] = [
             node_id for node_id in self.problem.node_ids
             if node_id != self.problem.depot_id
         ]
-        # We'll store the history here via the observer
-        self.cost_history = []
+        
+        # History tracker populated by the observer during evolution
+        self.cost_history: List[float] = []
+        
+        # Pre-compute distances to optimize performance
+        self.dist_matrix: Dict[Tuple[int, int], float] = self._build_distance_matrix()
+
+    def _build_distance_matrix(self) -> Dict[Tuple[int, int], float]:
+        """
+        Pre-calculates the Euclidean distance between all nodes.
+        
+        Returns:
+            Dict[Tuple[int, int], float]: A dictionary mapping node pairs to distances.
+        """
+        dist: Dict[Tuple[int, int], float] = {}
+        for i in self.problem.nodes:
+            for j in self.problem.nodes:
+                if i != j:
+                    x1, y1 = self.problem.nodes[i]
+                    x2, y2 = self.problem.nodes[j]
+                    dist[(i, j)] = math.hypot(x1 - x2, y1 - y2)
+        return dist
 
     # --- INSPYRED COMPONENTS ---
-    def evaluate_population(self, candidates: list, args: dict) -> list:
+
+    def evaluate_population(self, candidates: List[List[int]], args: Dict[str, Any]) -> List[float]:
         """
-        Calculates fitness for the entire population.
+        Calculates fitness (total route distance) for the entire population.
+        
+        Args:
+            candidates (List[List[int]]): The list of chromosomes to evaluate.
+            args (Dict[str, Any]): Additional arguments passed by Inspyred.
+            
+        Returns:
+            List[float]: The fitness values corresponding to each candidate.
         """
-        fitness_values = []
+        fitness_values: List[float] = []
         for candidate in candidates:
-            decoded_route = self.decode_chromosome(candidate)
-            fitness = self.problem.evaluate_route_distance(decoded_route)
+            decoded_route: List[int] = self.decode_chromosome(candidate)
+            fitness: float = self.problem.evaluate_route_distance(decoded_route)
             fitness_values.append(fitness)
         return fitness_values
 
-    def inversion_mutation(self, prng: random.Random, candidate: list, mutation_rate: float) -> list:
-        """Double Inversion to forcefully break out of deep local optima."""
-        mutated = candidate[:]
+    def inversion_mutation(self, prng: random.Random, candidate: List[int], mutation_rate: float) -> List[int]:
+        """
+        Applies a Double Inversion mutation to forcefully break out of deep local optima.
+        
+        Args:
+            prng (random.Random): The pseudo-random number generator instance.
+            candidate (List[int]): The chromosome to mutate.
+            mutation_rate (float): Probability of mutation occurring.
+            
+        Returns:
+            List[int]: The potentially mutated chromosome.
+        """
+        mutated: List[int] = candidate[:]
         if prng.random() < mutation_rate:
             if len(mutated) >= 4:
-                # Primera inversión
+                # First inversion segment
                 idx1, idx2 = sorted(prng.sample(range(len(mutated)), 2))
-                mutated[idx1:idx2] = reversed(mutated[idx1:idx2])
-                # Segunda inversión (el golpe de gracia al estancamiento)
+                mutated[idx1:idx2] = list(reversed(mutated[idx1:idx2]))
+                # Second inversion segment to ensure significant structural change
                 idx3, idx4 = sorted(prng.sample(range(len(mutated)), 2))
-                mutated[idx3:idx4] = reversed(mutated[idx3:idx4])
+                mutated[idx3:idx4] = list(reversed(mutated[idx3:idx4]))
         return mutated
     
-    def generate_chromosome(self, random, args: dict) -> list:
+    def generate_chromosome(self, random: random.Random, args: Dict[str, Any]) -> List[int]:
         """
-        Generates a chromosome using a Randomized Nearest Neighbor heuristic.
-        Massively improves the starting quality (Generation 0) to compete with ACO.
+        Generates a chromosome using a Cluster-First, Route-Second Heuristic.
+        This mirrors the successful approach used in the PSO implementation, grouping
+        nodes by spatial proximity and capacity before generating the final sequence.
+        
+        Args:
+            random (random.Random): Inspyred's internal random number generator.
+            args (Dict[str, Any]): Additional arguments passed by Inspyred.
+            
+        Returns:
+            List[int]: A newly generated chromosome.
         """
-        # 100% random initial route 85% of times
-        if random.random() < 0.85:
-            chromosome = list(self.clients)
+        # Maintain 20% pure randomness to preserve baseline genetic diversity
+        if random.random() < 0.20:
+            chromosome: List[int] = list(self.clients)
             random.shuffle(chromosome)
             return chromosome
 
-        unvisited = set(self.clients)
-        chromosome = []
+        # --- Cluster-First Grouping Heuristic ---
+        unvisited: Set[int] = set(self.clients)
+        chromosome: List[int] = []
         
-        # Start off in random node
-        current_node = random.choice(list(unvisited))
-        unvisited.remove(current_node)
-        chromosome.append(current_node)
-        
-        # Looking for nearby nodes, heuristic
         while unvisited:
-            # Seleccionamos un "vecindario" de los 5 nodos más cercanos al actual
-            # (Esto añade aleatoriedad controlada, a diferencia de un Greedy puro)
-            candidates = random.sample(list(unvisited), min(5, len(unvisited)))
+            # 1. Start a new "vehicle" (cluster) from the depot
+            current_node: int = self.problem.depot_id
+            current_load: int = 0
             
-            # De esos 5, elegimos el que esté más cerca físicamente
-            best_candidate = None
-            min_dist = float('inf')
-            
-            # Necesitamos las coordenadas para medir (asumimos que las tienes en self.problem.nodes)
-            curr_coords = self.problem.nodes[current_node]
-            
-            for candidate in candidates:
-                cand_coords = self.problem.nodes[candidate]
-                # Distancia euclidiana simple al cuadrado (más rápido de computar)
-                dist_sq = (curr_coords[0] - cand_coords[0])**2 + (curr_coords[1] - cand_coords[1])**2
+            # 2. Fill the vehicle with the nearest valid nodes until capacity is reached
+            while unvisited:
+                # Find valid candidates that do not exceed vehicle capacity
+                valid_candidates: List[int] = [
+                    c for c in unvisited 
+                    if current_load + self.problem.demands[c] <= self.problem.capacity
+                ]
                 
-                if dist_sq < min_dist:
-                    min_dist = dist_sq
-                    best_candidate = candidate
-                    
-            current_node = best_candidate
-            unvisited.remove(current_node)
-            chromosome.append(current_node)
-            
+                if not valid_candidates:
+                    break # Vehicle is full or remaining nodes exceed capacity; close cluster
+                
+                # Sort valid candidates by proximity to the current node using cached distances
+                valid_candidates.sort(key=lambda c: self.dist_matrix[(current_node, c)])
+                
+                # Select randomly from the top 3 closest nodes to maintain stochasticity
+                top_candidates: List[int] = valid_candidates[:3]
+                best_candidate: int = random.choice(top_candidates)
+                
+                # Append to the route sequence and update states
+                chromosome.append(best_candidate)
+                unvisited.remove(best_candidate)
+                current_load += self.problem.demands[best_candidate]
+                current_node = best_candidate
+
         return chromosome
     
-    def custom_variator(self, random: random.Random, candidates: list, args: dict) -> list:
+    def custom_variator(self, random: random.Random, candidates: List[inspyred.ec.Individual], args: Dict[str, Any]) -> List[List[int]]:
         """
-        Inspyred Variator: Applies OX1 crossover, INVERSION mutation, and optional 2-opt Local Search.
+        Inspyred Variator: Orchestrates OX1 crossover, INVERSION mutation, 
+        and optional Windowed 2-opt Local Search (Memetic refinement).
+        
+        Args:
+            random (random.Random): Inspyred's internal random number generator.
+            candidates (List[inspyred.ec.Individual]): The parent population selected for reproduction.
+            args (Dict[str, Any]): Dictionary containing algorithmic parameters.
+            
+        Returns:
+            List[List[int]]: The generated offspring population.
         """
-        mutation_rate = args.setdefault('mutation_rate', 0.20)
-        use_local_search = args.setdefault('use_local_search', False)
-        # Aseguramos que la variable coincida con el método run()
-        ls_prob = args.setdefault('local_search_prob', 0.15) 
+        mutation_rate: float = args.setdefault('mutation_rate', 0.20)
+        use_local_search: bool = args.setdefault('use_local_search', False)
+        ls_prob: float = args.setdefault('local_search_prob', 0.15) 
 
-        offspring = []
+        offspring: List[List[int]] = []
         for i in range(0, len(candidates), 2):
-            parent1 = candidates[i]
-            parent2 = candidates[i+1] if i + 1 < len(candidates) else candidates[0]
+            parent1: List[int] = candidates[i]
+            # Handle odd population sizes safely
+            parent2: List[int] = candidates[i+1] if i + 1 < len(candidates) else candidates[0]
 
-            child1 = self.order_crossover(parent1, parent2)
-            child2 = self.order_crossover(parent2, parent1)
+            # Apply Order Crossover (OX1)
+            child1: List[int] = self.order_crossover(parent1, parent2)
+            child2: List[int] = self.order_crossover(parent2, parent1)
 
-            # inversion instead of swap
+            # Apply Double Inversion Mutation
             child1 = self.inversion_mutation(random, child1, mutation_rate)
             child2 = self.inversion_mutation(random, child2, mutation_rate)
 
-            # probability control for the memetic
+            # Apply Memetic Local Search (if enabled and probability hits)
             if use_local_search:
                 if random.random() < ls_prob:
                     child1 = self.apply_windowed_2opt(child1)
@@ -120,40 +183,53 @@ class MultimodalGeneticAlgorithm:
 
             offspring.extend([child1, child2])
 
+        # Ensure we return exactly the requested number of offspring
         return offspring[:len(candidates)]
     
-    def diversity_replacer(self, random, population, offspring, args, **kwargs):
+    def diversity_replacer(self, random: random.Random, population: List[inspyred.ec.Individual], 
+                           offspring: List[inspyred.ec.Individual], args: Dict[str, Any], **kwargs: Any) -> List[inspyred.ec.Individual]:
         """
-        Custom Inspyred Replacer (Crowding): 
-        Ensures the population maintains structural diversity during evolution.
+        Custom Inspyred Replacer (Crowding Mechanism): 
+        Ensures the survivor population maintains a minimum structural diversity threshold.
+        
+        Args:
+            random (random.Random): Inspyred's internal RNG.
+            population (List[Individual]): The previous generation's population.
+            offspring (List[Individual]): The newly created offspring.
+            args (Dict[str, Any]): Dictionary containing algorithmic parameters.
+            
+        Returns:
+            List[Individual]: The selected survivor population for the next generation.
         """
-        threshold = args.setdefault('similarity_threshold', 0.15)
-        combined = population + offspring
-        # Sort by fitness (lowest is best)
+        threshold: float = args.setdefault('similarity_threshold', 0.15)
+        combined: List[inspyred.ec.Individual] = population + offspring
+        
+        # Sort combined population by best fitness (lowest distance)
         combined.sort(key=lambda x: x.fitness) 
         
-        unique_population = []
+        unique_population: List[inspyred.ec.Individual] = []
         for individual in combined:
             if len(unique_population) >= self.pop_size:
                 break
                 
-            is_diverse = True
-            route_ind = self.decode_chromosome(individual.candidate)
+            is_diverse: bool = True
+            route_ind: List[int] = self.decode_chromosome(individual.candidate)
             
+            # Check against currently accepted diverse individuals
             for accepted in unique_population:
-                route_acc = self.decode_chromosome(accepted.candidate)
+                route_acc: List[int] = self.decode_chromosome(accepted.candidate)
+                dist: float = DiversityHandler.calculate_jaccard_distance(route_ind, route_acc)
                 
-                # Usamos la clase común para medir la diversidad
-                dist = DiversityHandler.calculate_jaccard_distance(route_ind, route_acc)
-                
-                if dist < threshold: # Too similar to an existing one
+                # Reject if topological similarity is below the acceptable threshold
+                if dist < threshold: 
                     is_diverse = False
                     break
             
             if is_diverse:
                 unique_population.append(individual)
         
-        # If we filtered out too many, fill the rest with the remaining best individuals
+        # Fallback: If strict diversity filtering leaves the population undersized, 
+        # fill the remainder with the best available non-selected individuals.
         if len(unique_population) < self.pop_size:
             for ind in combined:
                 if ind not in unique_population:
@@ -163,146 +239,185 @@ class MultimodalGeneticAlgorithm:
                         
         return unique_population
        
-    def observer_tracker(self, population: list, num_generations: int, num_evaluations: int, args: dict) -> None:
+    def observer_tracker(self, population: List[inspyred.ec.Individual], num_generations: int, num_evaluations: int, args: Dict[str, Any]) -> None:
         """
-        Inspyred Observer: Runs at the end of each generation to track progress.
+        Inspyred Observer: Executes at the end of each generation to track optimization progress.
         """
-        best_fitness = min([ind.fitness for ind in population])
+        best_fitness: float = min([ind.fitness for ind in population])
         self.cost_history.append(best_fitness)
         
         if num_generations % 10 == 0:
             print(f"Generation {num_generations:3d} | Best cost: {best_fitness:.2f}")
 
     # --- DOMAIN LOGIC ---
-    def decode_chromosome(self, chromosome: list) -> list:
+
+    def decode_chromosome(self, chromosome: List[int]) -> List[int]:
         """
-        Converts a client permutation into a valid CVRP route with depots.
+        Converts a linear client permutation into a valid CVRP route containing depot visits.
+        
+        Args:
+            chromosome (List[int]): The sequence of clients.
+            
+        Returns:
+            List[int]: The full route including necessary depot returns for capacity constraints.
         """
-        route = [self.problem.depot_id]
-        current_load = 0
+        route: List[int] = [self.problem.depot_id]
+        current_load: int = 0
 
         for client in chromosome:
-            demand = self.problem.demands[client]
+            demand: int = self.problem.demands[client]
+            # If adding this client exceeds capacity, return to depot first
             if current_load + demand > self.problem.capacity:
                 route.append(self.problem.depot_id)
                 current_load = 0
+            
             route.append(client)
             current_load += demand
         
+        # Ensure the final route terminates at the depot
         if route[-1] != self.problem.depot_id:
             route.append(self.problem.depot_id)
         
         return route
     
-    def evaluate_fitness(self, decoded_route: list) -> float:
-        """Calculates total distance."""
+    def evaluate_fitness(self, decoded_route: List[int]) -> float:
+        """
+        Wrapper to calculate the total Euclidean distance of a fully decoded CVRP route.
+        """
         return self.problem.evaluate_route_distance(decoded_route)
     
-    def order_crossover(self, parent1: list, parent2: list) -> list:
-        """Performs OX1 crossover."""
-        size = len(parent1)
-        child = [-1] * size
+    def order_crossover(self, parent1: List[int], parent2: List[int]) -> List[int]:
+        """
+        Performs Order Crossover (OX1), preserving relative ordering and absolute positions.
+        
+        Args:
+            parent1 (List[int]): Primary parent chromosome.
+            parent2 (List[int]): Secondary parent chromosome.
+            
+        Returns:
+            List[int]: The generated offspring chromosome.
+        """
+        size: int = len(parent1)
+        child: List[int] = [-1] * size
 
+        # Select a random continuous segment from parent1
         start, end = sorted(random.sample(range(size), 2))
         child[start:end+1] = parent1[start:end+1]
 
-        p2_pointer = (end + 1) % size
-        child_pointer = (end + 1) % size
+        # Fill the remaining genes from parent2, preserving their relative order
+        p2_pointer: int = (end + 1) % size
+        child_pointer: int = (end + 1) % size
         
         while -1 in child:
-            gene = parent2[p2_pointer]
+            gene: int = parent2[p2_pointer]
             if gene not in child:
                 child[child_pointer] = gene
                 child_pointer = (child_pointer + 1) % size
             p2_pointer = (p2_pointer + 1) % size
+            
         return child
 
-    def swap_mutation(self, chromosome: list, mutation_rate: float = 0.05) -> list:
-        """Performs swap mutation."""
-        if random.random() < mutation_rate:
-            idx1, idx2 = random.sample(range(len(chromosome)), 2)
-            chromosome[idx1], chromosome[idx2] = chromosome[idx2], chromosome[idx1]
-        return chromosome
-    
-    def apply_windowed_2opt(self, chromosome: list, max_iterations: int = 3, window_size: int = 100) -> list:
+    def apply_windowed_2opt(self, chromosome: List[int], max_iterations: int = 3, window_size: int = 100) -> List[int]:
         """
         Enhanced 2-opt Local Search. 
-        Window size expanded to allow global untangling of random initial routes.
-        """
-        best_chromosome = chromosome[:]
-        best_cost = self.evaluate_fitness(self.decode_chromosome(best_chromosome))
+        Explores localized edge reversals to untangle routes and eliminate cross-overs.
         
-        improved = True
-        iterations = 0
-        chrom_len = len(chromosome)
+        Args:
+            chromosome (List[int]): The base chromosome to optimize.
+            max_iterations (int): Maximum optimization passes.
+            window_size (int): Lookahead limit for edge swaps to control computational overhead.
+            
+        Returns:
+            List[int]: The locally optimized chromosome.
+        """
+        best_chromosome: List[int] = chromosome[:]
+        best_cost: float = self.evaluate_fitness(self.decode_chromosome(best_chromosome))
+        
+        improved: bool = True
+        iterations: int = 0
+        chrom_len: int = len(chromosome)
         
         while improved and iterations < max_iterations:
             improved = False
             for i in range(chrom_len - 1):
-                # Ampliamos el límite para revisar casi toda la ruta
-                limit = min(i + window_size, chrom_len) 
+                limit: int = min(i + window_size, chrom_len) 
                 for j in range(i + 2, limit):
-                    new_chrom = best_chromosome[:i] + best_chromosome[i:j][::-1] + best_chromosome[j:]
-                    new_cost = self.evaluate_fitness(self.decode_chromosome(new_chrom))
+                    # Perform edge swap via sub-route reversal
+                    new_chrom: List[int] = best_chromosome[:i] + best_chromosome[i:j][::-1] + best_chromosome[j:]
+                    new_cost: float = self.evaluate_fitness(self.decode_chromosome(new_chrom))
                     
                     if new_cost < best_cost:
                         best_cost = new_cost
                         best_chromosome = new_chrom
                         improved = True
-                        break # Encontramos mejora, aplicamos y reiniciamos búsqueda
+                        break # Break inner loop upon finding an improvement
                 if improved:
-                    break
+                    break # Break outer loop to restart search from the newly optimized state
             iterations += 1
             
         return best_chromosome
 
     def run(self, generations: int = 100, mutation_rate: float = 0.20,  
             similarity_threshold: float = 0.15, use_local_search: bool = False,
-            tournament_size: int = 2, local_search_prob: float = 0.15) -> tuple:
+            tournament_size: int = 2, local_search_prob: float = 0.15) -> Tuple[List[Tuple[List[int], float]], List[float]]:
         """
-        Orchestrates the Inspyred engine and extracts the Top 3 distinct routes.
-        'use_local_search' acts as a toggle between Pure GA and Memetic GA.
+        Orchestrates the Inspyred evolutionary engine and extracts diverse routing niches.
+        
+        Args:
+            generations (int): Maximum number of generations to run.
+            mutation_rate (float): Probability of mutation occurring.
+            similarity_threshold (float): Minimum required topological diversity between niches.
+            use_local_search (bool): Toggles the Memetic 2-opt refinement phase.
+            tournament_size (int): Size of the tournament selection bracket.
+            local_search_prob (float): Probability of applying 2-opt to an individual.
+            
+        Returns:
+            Tuple: A list of the top 3 diverse niches (route, cost) and the historical convergence data.
         """
-        algo_type = "Memetic" if use_local_search else "Pure"
+        algo_type: str = "Memetic" if use_local_search else "Pure"
         print(f"Starting {algo_type} Multimodal GA for {generations} generations.")
         
-        prng = random.Random()
-        ga_engine = inspyred.ec.EvolutionaryComputation(prng)
+        prng: random.Random = random.Random()
+        ga_engine: inspyred.ec.EvolutionaryComputation = inspyred.ec.EvolutionaryComputation(prng)
 
+        # Configure evolutionary architecture
         ga_engine.selector = inspyred.ec.selectors.tournament_selection
         ga_engine.replacer = self.diversity_replacer 
         ga_engine.variator = self.custom_variator
         ga_engine.terminator = inspyred.ec.terminators.generation_termination
         ga_engine.observer = self.observer_tracker
 
-        self.cost_history = []
+        self.cost_history.clear()
 
-        # Execute the evolution
-        final_population = ga_engine.evolve(
+        # Execute the primary evolution loop
+        final_population: List[inspyred.ec.Individual] = ga_engine.evolve(
             generator=self.generate_chromosome,
             evaluator=self.evaluate_population,
             pop_size=self.pop_size,
             bounder=inspyred.ec.DiscreteBounder(self.clients),
             maximize=False, 
             max_generations=generations,
-            tournament_size=tournament_size,          # CORREGIDO: Dinámico, no hardcodeado a 3
+            tournament_size=tournament_size,
             mutation_rate=mutation_rate,
             similarity_threshold=similarity_threshold,
             use_local_search=use_local_search,
-            local_search_prob=local_search_prob       # NUEVO: Frena la homogeneización del 2-opt
+            local_search_prob=local_search_prob
         )
 
+        # Sort the final population strictly by fitness
         final_population.sort(key=lambda x: x.fitness)
         
-        top_3_solutions = []
+        # Extract the Top 3 structurally distinct solutions (Niches)
+        top_3_solutions: List[Tuple[List[int], float]] = []
+        
         for ind in final_population:
             if len(top_3_solutions) >= 3:
                 break
                 
-            route = self.decode_chromosome(ind.candidate)
-            cost = ind.fitness
+            route: List[int] = self.decode_chromosome(ind.candidate)
+            cost: float = ind.fitness
             
-            is_novel = True
+            is_novel: bool = True
             for accepted_route, _ in top_3_solutions:
                 if DiversityHandler.calculate_jaccard_distance(route, accepted_route) < similarity_threshold:
                     is_novel = False
@@ -311,11 +426,13 @@ class MultimodalGeneticAlgorithm:
             if is_novel:
                 top_3_solutions.append((route, cost))
 
+        # Fallback processing if rigid diversity constraints yield fewer than 3 niches
         if len(top_3_solutions) < 3:
             for ind in final_population:
                 if len(top_3_solutions) >= 3:
                     break
                 route = self.decode_chromosome(ind.candidate)
+                # Check for strict topological equality rather than distance threshold
                 if not any(route == acc_route for acc_route, _ in top_3_solutions):
                     top_3_solutions.append((route, ind.fitness))
 
