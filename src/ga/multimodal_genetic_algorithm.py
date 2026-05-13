@@ -2,6 +2,7 @@ import math
 import random 
 from typing import List, Dict, Tuple, Set, Any
 import inspyred
+import time
 
 from src.common.problem import CVRPProblem
 from src.common.diversity import DiversityHandler
@@ -497,6 +498,96 @@ class PassiveArchiveGA(MultimodalGeneticAlgorithm):
                 filtered_niches.append((route, cost))
 
         return filtered_niches, self.cost_history
+    
+class SequentialNichingGA(MultimodalGeneticAlgorithm):
+    def __init__(self, problem: Any, pop_size: int = 100) -> None:
+        super().__init__(problem, pop_size)
+        self.tabu_niches: List[List[int]] = [] # Memory of structurally forbidden routes
+        self.history_sequential: List[float] = []
+
+    def evaluate_population(self, candidates: List[Any], args: Dict[str, Any]) -> List[float]:
+        """
+        Evaluates fitness but applies a massive penalty (derating function) 
+        to routes topologically similar to already discovered (Tabu) niches.
+        """
+        fitness_values: List[float] = []
+        penalty_factor: float = 10.0 # Multiply cost by 10 to kill it genetically
+        similarity_threshold: float = args.setdefault('similarity_threshold', 0.20)
+
+        for candidate in candidates:
+            decoded_route: List[int] = self.decode_chromosome(candidate)
+            base_fitness: float = self.problem.evaluate_route_distance(decoded_route)
+
+            is_tabu: bool = False
+            for tabu_route in self.tabu_niches:
+                # If it's too similar to a known niche, mark as tabu
+                if DiversityHandler.calculate_jaccard_distance(decoded_route, tabu_route) < similarity_threshold:
+                    is_tabu = True
+                    break
+
+            if is_tabu:
+                fitness_values.append(base_fitness * penalty_factor)
+            else:
+                fitness_values.append(base_fitness)
+
+        return fitness_values
+
+    def run_sequential(self, num_niches: int = 3, generations_per_niche: int = 80, 
+                       mutation_rate: float = 0.20, similarity_threshold: float = 0.20, 
+                       local_search_prob: float = 0.80) -> Tuple[List[Tuple[List[int], float]], List[float]]:
+        
+        extracted_niches: List[Tuple[List[int], float]] = []
+        start_time: float = time.perf_counter()
+
+        for interval in range(num_niches):
+            print(f"  --> Running Sequential Interval {interval+1}/{num_niches} ({generations_per_niche} generations)...")
+            
+            prng: random.Random = random.Random()
+            ga_engine: inspyred.ec.EvolutionaryComputation = inspyred.ec.EvolutionaryComputation(prng)
+
+            ga_engine.selector = inspyred.ec.selectors.tournament_selection
+            # Generational replacement is safe here because the penalty function actively handles diversity
+            ga_engine.replacer = inspyred.ec.replacers.generational_replacement 
+            ga_engine.variator = self.custom_variator
+            ga_engine.terminator = inspyred.ec.terminators.generation_termination
+            
+            self.cost_history.clear()
+            ga_engine.observer = self.observer_tracker
+
+            final_pop: List[Any] = ga_engine.evolve(
+                generator=self.generate_chromosome,
+                evaluator=self.evaluate_population,
+                pop_size=self.pop_size,
+                bounder=inspyred.ec.DiscreteBounder(self.clients),
+                maximize=False,
+                max_generations=generations_per_niche,
+                tournament_size=3,
+                mutation_rate=mutation_rate,
+                similarity_threshold=similarity_threshold,
+                use_local_search=True,
+                local_search_prob=local_search_prob # CRITICAL FIX: Repaired the Memetic link
+            )
+
+            # Extract the best individual from this sequential interval
+            final_pop.sort(key=lambda x: x.fitness)
+            best_ind: Any = final_pop[0]
+            best_route: List[int] = self.decode_chromosome(best_ind.candidate)
+            
+            # Recalculate physical distance (ignoring artificial derating penalties)
+            real_cost: float = self.problem.evaluate_route_distance(best_route)
+            
+            extracted_niches.append((best_route, real_cost))
+            
+            # CRITICAL: Append to Tabu list to force exploration elsewhere in the next interval
+            self.tabu_niches.append(best_route)
+            
+            # Store continuous history across all intervals
+            self.history_sequential.extend(self.cost_history)
+            
+        execution_time: float = time.perf_counter() - start_time
+        print(f"\n✅ Sequential Extraction Complete in {execution_time:.2f} seconds.")
+        return extracted_niches, self.history_sequential
+
     
 class SequentialPenaltyGA(SequentialNichingGA):
     
