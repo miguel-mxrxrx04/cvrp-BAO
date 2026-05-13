@@ -433,3 +433,127 @@ class MultimodalGeneticAlgorithm:
 
         print("Evolution completed.")
         return top_3_solutions, self.cost_history
+    
+
+class PassiveArchiveGA(MultimodalGeneticAlgorithm):
+    def __init__(self, problem: Any, pop_size: int = 100) -> None:
+        super().__init__(problem, pop_size)
+        self.passive_archive: List[Tuple[List[int], float]] = []
+        
+    def observer_tracker(self, population: List[inspyred.ec.Individual], num_generations: int, num_evaluations: int, args: Dict[str, Any]) -> None:
+        best_fitness: float = min([ind.fitness for ind in population])
+        self.cost_history.append(best_fitness)
+        
+        threshold_fitness: float = best_fitness * 1.10 
+        
+        for ind in population:
+            if ind.fitness <= threshold_fitness:
+                route: List[int] = self.decode_chromosome(ind.candidate)
+                self.passive_archive.append((route, ind.fitness))
+                
+        if num_generations % 20 == 0:
+            print(f"  [Log] Gen {num_generations:3d} | Best: {best_fitness:.2f} | Archive Size: {len(self.passive_archive)}")
+
+    def run(self, generations: int = 150, mutation_rate: float = 0.20, similarity_threshold: float = 0.20, local_search_prob: float = 0.80) -> Tuple[List[Tuple[List[int], float]], List[float]]:
+        prng: random.Random = random.Random()
+        ga_engine: inspyred.ec.EvolutionaryComputation = inspyred.ec.EvolutionaryComputation(prng)
+
+        ga_engine.selector = inspyred.ec.selectors.tournament_selection
+        ga_engine.replacer = inspyred.ec.replacers.generational_replacement 
+        ga_engine.variator = self.custom_variator
+        ga_engine.terminator = inspyred.ec.terminators.generation_termination
+        ga_engine.observer = self.observer_tracker
+
+        self.cost_history.clear()
+        self.passive_archive.clear()
+
+        ga_engine.evolve(
+            generator=self.generate_chromosome, 
+            evaluator=self.evaluate_population, 
+            pop_size=self.pop_size,
+            bounder=inspyred.ec.DiscreteBounder(self.clients), 
+            maximize=False, 
+            max_generations=generations,
+            tournament_size=3, 
+            mutation_rate=mutation_rate, 
+            use_local_search=True,
+            local_search_prob=local_search_prob
+        )
+
+        self.passive_archive.sort(key=lambda x: x[1])
+        filtered_niches: List[Tuple[List[int], float]] = []
+        
+        for route, cost in self.passive_archive:
+            if len(filtered_niches) >= 3:
+                break
+            
+            is_novel: bool = True
+            for accepted_route, _ in filtered_niches:
+                if DiversityHandler.calculate_jaccard_distance(route, accepted_route) < similarity_threshold:
+                    is_novel = False
+                    break
+                    
+            if is_novel:
+                filtered_niches.append((route, cost))
+
+        return filtered_niches, self.cost_history
+    
+class SequentialPenaltyGA(SequentialNichingGA):
+    
+    def decode_chromosome(self, chromosome: List[int]) -> List[int]:
+        """
+        SOFT CONSTRAINTS: We allow the vehicle to overload up to 150% 
+        before forcing a return to depot.
+        """
+        route: List[int] = [self.problem.depot_id]
+        current_load: int = 0
+
+        for client in chromosome:
+            demand: int = self.problem.demands[client]
+            if current_load + demand > self.problem.capacity * 1.5:
+                route.append(self.problem.depot_id)
+                current_load = 0
+            
+            route.append(client)
+            current_load += demand
+        
+        if route[-1] != self.problem.depot_id:
+            route.append(self.problem.depot_id)
+        
+        return route
+
+    def evaluate_population(self, candidates: List[Any], args: Dict[str, Any]) -> List[float]:
+        fitness_values: List[float] = []
+        tabu_penalty_factor: float = 10.0 
+        capacity_penalty_weight: float = 50.0 
+        similarity_threshold: float = args.setdefault('similarity_threshold', 0.20)
+
+        for candidate in candidates:
+            decoded_route: List[int] = self.decode_chromosome(candidate)
+            base_fitness: float = self.problem.evaluate_route_distance(decoded_route)
+
+            # --- 1. Penalty for Overloading ---
+            overload_penalty: float = 0.0
+            current_load: int = 0
+            for node in decoded_route:
+                if node == self.problem.depot_id:
+                    if current_load > self.problem.capacity:
+                        overload_penalty += (current_load - self.problem.capacity) * capacity_penalty_weight
+                    current_load = 0
+                else:
+                    current_load += self.problem.demands[node]
+
+            # --- 2. Penalty for Tabu Similarity ---
+            is_tabu: bool = False
+            for tabu_route in self.tabu_niches:
+                if DiversityHandler.calculate_jaccard_distance(decoded_route, tabu_route) < similarity_threshold:
+                    is_tabu = True
+                    break
+
+            final_fitness: float = base_fitness + overload_penalty
+            if is_tabu:
+                final_fitness *= tabu_penalty_factor
+                
+            fitness_values.append(final_fitness)
+
+        return fitness_values
