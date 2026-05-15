@@ -1,3 +1,9 @@
-## CVRP 
+## CVRP GROUP 9
 
-pip install -r requirements.txt && pip install -e .
+CHEN BAO WUE LIANG
+IRALDE DOMINGUEZ RAFAEL
+MORA MEDINA MANUEL ADRIAN
+MORERA HERNANDEZ MIGUEL ANGEL
+RIVERA CUEVA JONNY DAVID
+
+dev branch is the most updated version or our work.
